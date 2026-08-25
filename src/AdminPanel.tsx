@@ -239,8 +239,28 @@ async function uploadToCloudinary(base64DataUrl: string, cfg: AdminConfig): Prom
 
 const PHOTOS_PATH = 'public/photos.json';
 
+/** 容忍粘贴仓库主页链接或 git 地址，统一成 owner/repo */
+function normalizeRepo(raw: string): string {
+  const v = raw.trim().replace(/^["']|["']$/g, '').replace(/\.git$/, '');
+  const parts = v
+    .replace(/^[a-z]+:\/\//i, '')
+    .replace(/^git@github\.com:/i, '')
+    .replace(/^(?:www\.)?github\.com\//i, '')
+    .split('/')
+    .filter(Boolean);
+  return parts.slice(0, 2).join('/');
+}
+
+function repoParts(cfg: AdminConfig): [string, string] {
+  const [owner, repo] = normalizeRepo(cfg.githubRepo).split('/');
+  if (!owner || !repo) {
+    throw new Error(`GitHub 仓库要填 owner/repo，例如 jayyuz/personal-photo-collections（当前：「${cfg.githubRepo}」）`);
+  }
+  return [owner, repo];
+}
+
 async function fetchPhotosMeta(cfg: AdminConfig): Promise<{ photos: ApiPhoto[]; sha: string }> {
-  const [owner, repo] = cfg.githubRepo.split('/');
+  const [owner, repo] = repoParts(cfg);
   const res = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/contents/${PHOTOS_PATH}`,
     { headers: { Authorization: `Bearer ${cfg.githubToken}`, Accept: 'application/vnd.github.v3+json' } }
@@ -253,7 +273,7 @@ async function fetchPhotosMeta(cfg: AdminConfig): Promise<{ photos: ApiPhoto[]; 
 }
 
 async function savePhotosMeta(photos: ApiPhoto[], cfg: AdminConfig, message: string): Promise<void> {
-  const [owner, repo] = cfg.githubRepo.split('/');
+  const [owner, repo] = repoParts(cfg);
   const { sha } = await fetchPhotosMeta(cfg).catch(() => ({ photos: [], sha: '' }));
   const body: Record<string, unknown> = {
     message,
@@ -272,6 +292,11 @@ async function savePhotosMeta(photos: ApiPhoto[], cfg: AdminConfig, message: str
       body: JSON.stringify(body),
     }
   );
+  if (res.status === 404) {
+    throw new Error(
+      `写入 ${owner}/${repo} 失败（404）。请确认仓库名正确、Token 属于该仓库的账号，且勾选了 repo 权限。`
+    );
+  }
   if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
 }
 
@@ -455,7 +480,7 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const isGithubOk      = Boolean(cfg.githubRepo && cfg.githubToken);
+  const isGithubOk      = Boolean(normalizeRepo(cfg.githubRepo).includes('/') && cfg.githubToken);
   const isCloudinaryOk  = Boolean(cfg.cloudName && cfg.uploadPreset);
   const hasLocalFiles   = pending.some(p => p.base64);
   const titlesOk        = pending.length > 0 && pending.every(p => p.title.trim());
@@ -562,6 +587,11 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
                       placeholder={f.placeholder}
                       autoComplete="off"
                     />
+                    {f.key === 'githubRepo' && (
+                      <span className="ap__field-help">
+                        只填 <strong>owner/repo</strong>，例如 jayyuz/personal-photo-collections，不要填完整网址。
+                      </span>
+                    )}
                     {f.key === 'cloudName' && (
                       <span className="ap__field-help">
                         Settings → API Keys 里的 Cloud name，不是 API Key。
