@@ -7,6 +7,7 @@ interface PhotoCardProps {
   index: number;
 }
 
+
 export function PhotoCard({ photo, onClick, index }: PhotoCardProps) {
   const [visible, setVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
