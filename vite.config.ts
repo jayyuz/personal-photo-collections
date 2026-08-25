@@ -23,7 +23,7 @@ export default defineConfig({
   base,
   plugins: [optionalJsxSourcePlugin(), react(), checker({ typescript: false }), uploadPlugin()],
   server: {
-    port: 3000,
+    port: 4000,
     host: '0.0.0.0',
     allowedHosts: [sandboxId, '.app.qpilot.woa.com', '.ap-guangzhou.tencentags.com'],
     hmr: { protocol: 'wss', clientPort: 443, host: `3000-${sandboxId}.ap-guangzhou.tencentags.com` },

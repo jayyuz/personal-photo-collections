@@ -1,11 +1,10 @@
 /**
- * usePhotos — 动态照片数据 hook
+ * usePhotos — 照片数据 hook
  *
- * 从 public/photos.json 读取用户上传的作品（Cloudinary URL）。
- * 合并策略：上传作品（动态）在前，静态 demo 数据在后。
+ * 唯一数据源是 public/photos.json（由管理面板写入，Cloudinary URL）。
  */
 import { useState, useEffect } from 'react';
-import { PHOTOS, type Photo, type PhotoSpan } from './data';
+import type { Photo, PhotoExif, PhotoSpan } from './data';
 
 interface ApiPhoto {
   id:        string;
@@ -15,6 +14,8 @@ interface ApiPhoto {
   location?: string;
   year?:     number;
   tint:      string;
+  cover?:    boolean;
+  exif?:     PhotoExif;
 }
 
 export function toPhoto(p: ApiPhoto): Photo {
@@ -26,24 +27,27 @@ export function toPhoto(p: ApiPhoto): Photo {
     location: p.location || undefined,
     year:     p.year     || undefined,
     tint:     p.tint,
+    cover:    p.cover || undefined,
+    exif:     p.exif  || undefined,
   };
 }
 
 export function usePhotos() {
-  const [uploadedPhotos, setUploaded] = useState<Photo[]>([]);
+  const [photos, setPhotos] = useState<Photo[]>([]);
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}photos.json`)
       .then(r => r.ok ? r.json() : [])
-      .then((data: ApiPhoto[]) => setUploaded(data.map(toPhoto)))
+      .then((data: ApiPhoto[]) => setPhotos(data.map(toPhoto)))
       .catch(() => {});
   }, []);
 
-  const addPhoto    = (p: Photo) => setUploaded(prev => [p, ...prev]);
-  const addPhotos   = (list: Photo[]) => setUploaded(prev => [...list, ...prev]);
-  const removePhoto = (id: string) => setUploaded(prev => prev.filter(p => p.id !== id));
+  const addPhotos   = (list: Photo[]) => setPhotos(prev => [...list, ...prev]);
+  const removePhoto = (id: string) => setPhotos(prev => prev.filter(p => p.id !== id));
+  const setCover    = (id: string) =>
+    setPhotos(prev => prev.map(p => ({ ...p, cover: p.id === id || undefined })));
 
-  const photos = [...uploadedPhotos, ...PHOTOS];
+  const coverPhoto = photos.find(p => p.cover) ?? photos[0];
 
-  return { photos, uploadedPhotos, addPhoto, addPhotos, removePhoto };
+  return { photos, coverPhoto, addPhotos, removePhoto, setCover };
 }

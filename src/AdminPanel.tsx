@@ -9,8 +9,9 @@
  * 配置存 localStorage，Token 不进源码。
  */
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { Photo, PhotoSpan } from './data';
+import type { Photo, PhotoExif, PhotoSpan } from './data';
 import { toPhoto } from './usePhotos';
+import { readExif, readExifFromUrl } from './exif';
 
 const SPAN_OPTS: { value: PhotoSpan; label: string }[] = [
   { value: 'normal', label: '普通 1×1' },
@@ -30,7 +31,8 @@ const TINT_OPTS = [
 ];
 const LS_CONFIG_KEY = 'photo-admin-config-v1';
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const MAX_BATCH = 20;
+const MAX_BATCH = 60;
+const LIB_PAGE = 60;
 const CLOUDINARY_URL_RE = /https?:\/\/res\.cloudinary\.com\/[^/\s]+\/(?:image|video)\/upload\/[^\s,;]+/gi;
 
 interface AdminConfig {
@@ -55,7 +57,8 @@ interface FormState {
 }
 interface ApiPhoto {
   id: string; title: string; src: string; span: string;
-  location?: string; year?: number; tint: string;
+  location?: string; year?: number; tint: string; cover?: boolean;
+  exif?: PhotoExif;
 }
 interface PendingItem {
   localId:    string;
@@ -63,6 +66,7 @@ interface PendingItem {
   preview:    string;
   base64:     string | null;
   remoteUrl:  string | null;
+  exif?:      PhotoExif;
 }
 
 function safeB64Encode(str: string): string {
@@ -337,12 +341,13 @@ const CFG_FIELDS: { key: keyof AdminConfig; label: string; placeholder: string; 
 
 interface AdminPanelProps {
   uploadedPhotos: Photo[];
-  onAdd:    (photos: Photo[]) => void;
-  onDelete: (id: string) => void;
-  onClose:  () => void;
+  onAdd:      (photos: Photo[]) => void;
+  onDelete:   (id: string) => void;
+  onSetCover: (id: string) => void;
+  onClose:    () => void;
 }
 
-export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPanelProps) {
+export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClose }: AdminPanelProps) {
   const [cfg, setCfg] = useState<AdminConfig>(() => {
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem(LS_CONFIG_KEY) || '{}') }; }
     catch { return DEFAULT_CONFIG; }
@@ -350,21 +355,31 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
   const [cfgOpen, setCfgOpen] = useState(() =>
     !cfg.githubRepo || !cfg.githubToken
   );
+  const [tab,       setTab]       = useState<'add' | 'manage'>('add');
   const [pending,   setPending]   = useState<PendingItem[]>([]);
   const [urlDraft,  setUrlDraft]  = useState('');
+  const [urlOpen,   setUrlOpen]   = useState(false);
   const [library,   setLibrary]   = useState<CloudAsset[]>([]);
   const [picked,    setPicked]    = useState<Set<string>>(new Set());
+  const [libQuery,  setLibQuery]  = useState('');
+  const [libShown,  setLibShown]  = useState(LIB_PAGE);
   const [listing,   setListing]   = useState(false);
   const [form,      setForm]      = useState<FormState>(DEFAULT_FORM);
   const [uploading, setUploading] = useState(false);
   const [dragOver,  setDragOver]  = useState(false);
   const [status,    setStatus]    = useState<{ type: 'err' | 'ok'; msg: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const lastPickRef = useRef<number | null>(null);
 
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', fn);
-    return () => window.removeEventListener('keydown', fn);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', fn);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [onClose]);
 
   const saveCfg = (next: AdminConfig) => {
@@ -411,13 +426,14 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
     }
     if (!ok.length) return;
     const items: PendingItem[] = await Promise.all(ok.map(async file => {
-      const dataUrl = await readFileAsDataUrl(file);
+      const [dataUrl, exif] = await Promise.all([readFileAsDataUrl(file), readExif(file)]);
       return {
         localId:   newLocalId(),
         title:     titleFromName(file.name),
         preview:   dataUrl,
         base64:    dataUrl,
         remoteUrl: null,
+        exif,
       };
     }));
     appendPending(items);
@@ -429,13 +445,21 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
       setStatus({ type: 'err', msg: '没有识别到 Cloudinary 链接。请粘贴 res.cloudinary.com 的图片 URL。' });
       return;
     }
-    appendPending(urls.map(url => ({
-      localId:   newLocalId(),
-      title:     titleFromName(decodeURIComponent(url.split('/').pop() || 'photo')),
-      preview:   optimizeCloudinaryUrl(url),
-      base64:    null,
-      remoteUrl: optimizeCloudinaryUrl(url),
-    })));
+    void (async () => {
+      setStatus({ type: 'ok', msg: '正在从网络图片读取 EXIF…' });
+      const items = await Promise.all(urls.map(async url => {
+        const optimized = optimizeCloudinaryUrl(url);
+        return {
+          localId:   newLocalId(),
+          title:     titleFromName(decodeURIComponent(url.split('/').pop() || 'photo')),
+          preview:   optimized,
+          base64:    null,
+          remoteUrl: optimized,
+          exif:      await readExifFromUrl(url),
+        };
+      }));
+      appendPending(items);
+    })();
     setUrlDraft('');
   }, [appendPending]);
 
@@ -453,6 +477,9 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
       );
       setLibrary(fresh);
       setPicked(new Set());
+      setLibQuery('');
+      setLibShown(LIB_PAGE);
+      lastPickRef.current = null;
       if (!fresh.length) {
         setStatus({ type: 'ok', msg: `拉到 ${assets.length} 张，都已经在站点或队列里了。` });
       } else {
@@ -472,15 +499,64 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
       setStatus({ type: 'err', msg: '请先勾选要导入的图片' });
       return;
     }
-    appendPending(selected.map(a => ({
-      localId:   newLocalId(),
-      title:     a.title,
-      preview:   a.url,
-      base64:    null,
-      remoteUrl: a.url,
-    })));
-    setLibrary(prev => prev.filter(a => !picked.has(a.publicId)));
-    setPicked(new Set());
+    void (async () => {
+      setStatus({ type: 'ok', msg: `正在从 ${selected.length} 张网络图片读取 EXIF…` });
+      const items = await Promise.all(selected.map(async a => ({
+        localId:   newLocalId(),
+        title:     a.title,
+        preview:   a.url,
+        base64:    null,
+        remoteUrl: a.url,
+        exif:      await readExifFromUrl(a.url),
+      })));
+      appendPending(items);
+      setLibrary(prev => prev.filter(a => !picked.has(a.publicId)));
+      setPicked(new Set());
+      lastPickRef.current = null;
+    })();
+  };
+
+  const q = libQuery.trim().toLowerCase();
+  const shownLibrary = q
+    ? library.filter(a => `${a.title} ${a.publicId}`.toLowerCase().includes(q))
+    : library;
+  const visibleLibrary = shownLibrary.slice(0, libShown);
+  const allShownPicked = shownLibrary.length > 0 && shownLibrary.every(a => picked.has(a.publicId));
+
+  /** 支持 Shift 连选，避免上百张时一个个点 */
+  const togglePick = (index: number, shift: boolean) => {
+    setPicked(prev => {
+      const next = new Set(prev);
+      const anchor = lastPickRef.current;
+      if (shift && anchor !== null && anchor !== index) {
+        const [from, to] = anchor < index ? [anchor, index] : [index, anchor];
+        const turnOn = !next.has(shownLibrary[index].publicId);
+        for (let i = from; i <= to; i++) {
+          const id = shownLibrary[i]?.publicId;
+          if (!id) continue;
+          if (turnOn) next.add(id);
+          else next.delete(id);
+        }
+      } else {
+        const id = shownLibrary[index].publicId;
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+    lastPickRef.current = index;
+  };
+
+  const toggleAllShown = () => {
+    setPicked(prev => {
+      const next = new Set(prev);
+      for (const a of shownLibrary) {
+        if (allShownPicked) next.delete(a.publicId);
+        else next.add(a.publicId);
+      }
+      return next;
+    });
+    lastPickRef.current = null;
   };
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -518,6 +594,8 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
         setStatus({ type: 'ok', msg: `处理 ${i + 1}/${pending.length}：${item.title}` });
         const src = item.remoteUrl
           ?? await uploadToCloudinary(item.base64!, cfg);
+        // 已有图片没带 EXIF 时尽力从投递地址读一次，失败就留空
+        const exif = item.exif ?? (item.remoteUrl ? await readExifFromUrl(src) : undefined);
         entries.push({
           id:       newLocalId(),
           title:    item.title.trim(),
@@ -526,6 +604,7 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
           location: form.location.trim() || undefined,
           year:     Number(form.year) || undefined,
           tint:     form.tint,
+          exif,
         });
       }
       setStatus({ type: 'ok', msg: '同步到 GitHub…' });
@@ -545,6 +624,27 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
     }
   };
 
+  const [coverBusy, setCoverBusy] = useState<string | null>(null);
+
+  const handleSetCover = async (photo: Photo) => {
+    if (!isGithubOk) { setStatus({ type: 'err', msg: '请先填写 GitHub 仓库和 Token' }); return; }
+    setCoverBusy(photo.id);
+    setStatus(null);
+    try {
+      const { photos: current } = await fetchPhotosMeta(cfg);
+      const next = current.map(p => (
+        p.id === photo.id ? { ...p, cover: true } : { ...p, cover: undefined }
+      ));
+      await savePhotosMeta(next, cfg, `🖼️ Cover: ${photo.title}`);
+      onSetCover(photo.id);
+      setStatus({ type: 'ok', msg: `已把「${photo.title}」设为首屏背景，部署后生效。` });
+    } catch (e) {
+      setStatus({ type: 'err', msg: String(e instanceof Error ? e.message : e) });
+    } finally {
+      setCoverBusy(null);
+    }
+  };
+
   const handleDelete = async (photo: Photo) => {
     if (!window.confirm(`确认删除「${photo.title}」？`)) return;
     if (!isGithubOk) { alert('请先完成 GitHub 配置'); return; }
@@ -558,39 +658,35 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
   };
 
   return (
-    <>
-      <div className="ap-mask" onClick={onClose} aria-hidden="true" />
-      <aside className="ap" role="dialog" aria-modal="true" aria-label="作品管理">
-        <div className="ap__head">
-          <span className="ap__title">管理作品</span>
+    <div className="apf" role="dialog" aria-modal="true" aria-label="作品管理">
+      <header className="apf__bar">
+        <div className="apf__bar-side">
+          <span className="apf__brand">管理作品</span>
+          <nav className="apf__tabs" aria-label="管理分区">
+            <button className={`apf__tab ${tab === 'add' ? 'apf__tab--on' : ''}`}
+              onClick={() => setTab('add')}>添加</button>
+            <button className={`apf__tab ${tab === 'manage' ? 'apf__tab--on' : ''}`}
+              onClick={() => setTab('manage')}>已发布</button>
+          </nav>
+        </div>
+        <div className="apf__bar-side">
+          <button className={`apf__cfg-btn ${isGithubOk ? '' : 'apf__cfg-btn--warn'}`}
+            onClick={() => setCfgOpen(v => !v)} aria-expanded={cfgOpen}>
+            <span className={`ap__cfg-dot ${isGithubOk ? 'ap__cfg-dot--ok' : 'ap__cfg-dot--warn'}`} />
+            配置
+          </button>
           <button className="ap__close" onClick={onClose} aria-label="关闭">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
-        <div className="ap__body">
-          <section className="ap__section">
-            <button
-              className="ap__sec-title ap__sec-toggle"
-              onClick={() => setCfgOpen(v => !v)}
-            >
-              <span>
-                {isGithubOk
-                  ? <span className="ap__cfg-dot ap__cfg-dot--ok" />
-                  : <span className="ap__cfg-dot ap__cfg-dot--warn" />
-                }
-                配置
-              </span>
-              <svg className={`ap__chevron ${cfgOpen ? 'ap__chevron--open' : ''}`}
-                width="12" height="12" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {cfgOpen && (
-              <div className="ap__cfg-panel">
+      </header>
+
+      {cfgOpen && (
+        <div className="apf__cfg">
+          <div className="apf__cfg-inner">
                 <p className="ap__cfg-hint">配置只存在你的浏览器里（localStorage），不进代码。</p>
                 {CFG_FIELDS.map(f => (
                   <label key={f.key} className="ap__label" style={{ marginBottom: 10 }}>
@@ -641,17 +737,32 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
                     )}
                   </label>
                 ))}
-                <div className="ap__cfg-links">
-                  <a href="https://console.cloudinary.com/app/settings/security" target="_blank" rel="noreferrer">放开 Resource list →</a>
-                  <a href="https://console.cloudinary.com/app/settings/upload" target="_blank" rel="noreferrer">Upload presets 设置 →</a>
-                  <a href="https://github.com/settings/tokens/new?scopes=repo&description=photo-portfolio" target="_blank" rel="noreferrer">生成 GitHub Token →</a>
-                </div>
-              </div>
-            )}
-          </section>
+            <div className="ap__cfg-links">
+              <a href="https://console.cloudinary.com/app/settings/security" target="_blank" rel="noreferrer">放开 Resource list →</a>
+              <a href="https://console.cloudinary.com/app/settings/upload" target="_blank" rel="noreferrer">Upload presets 设置 →</a>
+              <a href="https://github.com/settings/tokens/new?scopes=repo&description=photo-portfolio" target="_blank" rel="noreferrer">生成 GitHub Token →</a>
+            </div>
+          </div>
+        </div>
+      )}
 
-          <section className="ap__section">
-            <h3 className="ap__sec-title">添加作品</h3>
+      {tab === 'add' ? (
+        <div className="apf__main">
+          <section className="apf__pane">
+            <div className="apf__pane-head">
+              <span className="apf__pane-title">图片来源</span>
+              <div className="apf__pane-acts">
+                <button type="button" className="apf__mini"
+                  onClick={() => void fetchLibrary()}
+                  disabled={listing || !cfg.cloudName.trim()}>
+                  {listing ? '正在拉取…' : '拉取 Cloudinary 图库'}
+                </button>
+                <button type="button" className="apf__mini" onClick={() => setUrlOpen(v => !v)}>
+                  {urlOpen ? '收起链接输入' : '粘贴链接'}
+                </button>
+              </div>
+            </div>
+            <div className="apf__pane-body">
             <div
               className={`ap__drop ${dragOver ? 'ap__drop--over' : ''}`}
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -678,101 +789,134 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
               tabIndex={-1}
             />
 
-            <button
-              type="button"
-              className="ap__ghost"
-              style={{ marginTop: 12 }}
-              onClick={() => void fetchLibrary()}
-              disabled={listing || !cfg.cloudName.trim()}
-            >
-              {listing ? '正在拉取…' : '从 Cloudinary 拉取已有图片'}
-            </button>
+            {urlOpen && (
+              <div className="apf__url">
+                <label className="ap__label">
+                  粘贴已有 Cloudinary 链接
+                  <textarea
+                    className="ap__input ap__textarea"
+                    rows={3}
+                    value={urlDraft}
+                    onChange={e => setUrlDraft(e.target.value)}
+                    onPaste={e => {
+                      const text = e.clipboardData.getData('text');
+                      if (extractCloudinaryUrls(text).length) {
+                        e.preventDefault();
+                        addUrlsFromText(`${urlDraft}\n${text}`);
+                      }
+                    }}
+                    placeholder={'每行一条，例如：\nhttps://res.cloudinary.com/你的云名/image/upload/v1/photo.jpg'}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="ap__ghost"
+                  onClick={() => addUrlsFromText(urlDraft)}
+                  disabled={!urlDraft.trim() || uploading}
+                >
+                  加入队列
+                </button>
+              </div>
+            )}
 
             {library.length > 0 && (
               <div className="ap__lib">
                 <div className="ap__lib-bar">
-                  <button type="button" className="ap__lib-link" onClick={() =>
-                    setPicked(picked.size === library.length ? new Set() : new Set(library.map(a => a.publicId)))
-                  }>
-                    {picked.size === library.length ? '取消全选' : '全选'}
+                  <input
+                    className="ap__input apf__search"
+                    type="search"
+                    value={libQuery}
+                    onChange={e => { setLibQuery(e.target.value); setLibShown(LIB_PAGE); lastPickRef.current = null; }}
+                    placeholder="按名称筛选…"
+                  />
+                  <span className="apf__hint">已选 {picked.size} / {shownLibrary.length}</span>
+                  <button type="button" className="ap__lib-link" onClick={toggleAllShown}>
+                    {allShownPicked ? '取消全选' : '全选'}
                   </button>
-                  <button type="button" className="ap__lib-link" onClick={queuePickedFromLibrary} disabled={!picked.size}>
-                    加入队列（{picked.size}）
+                  <button type="button" className="ap__lib-link"
+                    onClick={queuePickedFromLibrary} disabled={!picked.size}>
+                    加入队列
                   </button>
                 </div>
-                <ul className="ap__lib-grid">
-                  {library.map(a => {
-                    const on = picked.has(a.publicId);
-                    return (
-                      <li key={a.publicId}>
-                        <button
-                          type="button"
-                          className={`ap__lib-card ${on ? 'ap__lib-card--on' : ''}`}
-                          onClick={() => setPicked(prev => {
-                            const next = new Set(prev);
-                            if (next.has(a.publicId)) next.delete(a.publicId);
-                            else next.add(a.publicId);
-                            return next;
-                          })}
-                        >
-                          <img src={a.url} alt={a.title} loading="lazy" />
-                          <span>{a.title}</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <p className="apf__hint">按住 Shift 点击可连选一段</p>
+                {shownLibrary.length === 0 ? (
+                  <p className="apf__empty">没有匹配的图片</p>
+                ) : (
+                  <>
+                    <ul className="ap__lib-grid">
+                      {visibleLibrary.map((a, i) => {
+                        const on = picked.has(a.publicId);
+                        return (
+                          <li key={a.publicId}>
+                            <button
+                              type="button"
+                              className={`ap__lib-card ${on ? 'ap__lib-card--on' : ''}`}
+                              aria-pressed={on}
+                              onClick={e => togglePick(i, e.shiftKey)}
+                            >
+                              <img src={a.url} alt={a.title} loading="lazy" />
+                              <span className="ap__lib-tick" aria-hidden="true">
+                                {on && (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                                    <polyline points="5 13 10 18 19 6" />
+                                  </svg>
+                                )}
+                              </span>
+                              <span className="ap__lib-name">{a.title}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {visibleLibrary.length < shownLibrary.length && (
+                      <button type="button" className="ap__ghost"
+                        onClick={() => setLibShown(n => n + LIB_PAGE)}>
+                        显示更多（还有 {shownLibrary.length - visibleLibrary.length} 张）
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             )}
+            </div>
+          </section>
 
-            <label className="ap__label" style={{ marginTop: 14 }}>
-              或粘贴已有 Cloudinary 链接
-              <textarea
-                className="ap__input ap__textarea"
-                rows={3}
-                value={urlDraft}
-                onChange={e => setUrlDraft(e.target.value)}
-                onPaste={e => {
-                  const text = e.clipboardData.getData('text');
-                  if (extractCloudinaryUrls(text).length) {
-                    e.preventDefault();
-                    addUrlsFromText(`${urlDraft}\n${text}`);
-                  }
-                }}
-                placeholder={'每行一条，例如：\nhttps://res.cloudinary.com/你的云名/image/upload/v1/photo.jpg'}
-              />
-            </label>
-            <button
-              type="button"
-              className="ap__ghost"
-              onClick={() => addUrlsFromText(urlDraft)}
-              disabled={!urlDraft.trim() || uploading}
-            >
-              加入队列
-            </button>
-
-            {pending.length > 0 && (
+          <aside className="apf__pane apf__pane--rail">
+            <div className="apf__pane-head">
+              <span className="apf__pane-title">待添加 {pending.length ? `· ${pending.length}` : ''}</span>
+              {pending.length > 0 && (
+                <button type="button" className="ap__lib-link" onClick={resetQueue}>清空</button>
+              )}
+            </div>
+            <div className="apf__pane-body">
+            {pending.length === 0 ? (
+              <p className="apf__empty">从左侧选择图片，或拖拽文件进来</p>
+            ) : (
               <ul className="ap__queue">
-                {pending.map(item => (
+                {pending.map((item, i) => (
                   <li key={item.localId} className="ap__queue-item">
                     <div className="ap__queue-thumb">
                       <img src={item.preview} alt="" />
                       {item.remoteUrl && <span className="ap__queue-badge">链接</span>}
                     </div>
-                    <input
-                      className="ap__input"
-                      value={item.title}
-                      onChange={e => setPending(prev =>
-                        prev.map(p => p.localId === item.localId ? { ...p, title: e.target.value } : p)
-                      )}
-                      placeholder="作品标题"
-                      maxLength={40}
-                    />
+                    <label className="ap__label ap__queue-title">
+                      标题 {pending.length > 1 ? `${i + 1}` : ''} <span className="ap__required">*</span>
+                      <input
+                        className="ap__input"
+                        value={item.title}
+                        onChange={e => setPending(prev =>
+                          prev.map(p => p.localId === item.localId ? { ...p, title: e.target.value } : p)
+                        )}
+                        placeholder="这张照片叫什么"
+                        maxLength={40}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="ap__item-del"
                       onClick={() => setPending(prev => prev.filter(p => p.localId !== item.localId))}
-                      aria-label={`移除 ${item.title}`}
+                      aria-label={`移除 ${item.title || '这张图'}`}
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -783,11 +927,14 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
                 ))}
               </ul>
             )}
+            </div>
 
-            <div className={`ap__form ${pending.length === 0 ? 'ap__form--hidden' : ''}`}>
+            <div className="apf__rail-foot">
+              <div className={`ap__form ${pending.length === 0 ? 'ap__form--hidden' : ''}`}>
+              <p className="apf__hint" style={{ marginBottom: 10 }}>以下对这一批共用</p>
               <div className="ap__row">
                 <label className="ap__label">
-                  拍摄地点（共用）
+                  拍摄地点
                   <input className="ap__input" type="text" value={form.location}
                     onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
                     placeholder="例：北京" maxLength={20} />
@@ -800,7 +947,7 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
                 </label>
               </div>
               <label className="ap__label">
-                布局大小（共用）
+                布局大小
                 <div className="ap__span-grid">
                   {SPAN_OPTS.map(o => (
                     <button key={o.value} type="button"
@@ -812,7 +959,7 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
                 </div>
               </label>
               <label className="ap__label">
-                色调氛围（共用）
+                色调氛围
                 <div className="ap__tint-grid">
                   {TINT_OPTS.map(o => (
                     <button key={o.value} type="button" title={o.label}
@@ -823,50 +970,77 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
                   ))}
                 </div>
               </label>
-              {status && (
-                <p className={status.type === 'err' ? 'ap__err' : 'ap__ok'}>{status.msg}</p>
-              )}
               <button className="ap__submit" onClick={handleUpload}
                 disabled={uploading || !canSubmit}>
                 {uploading
                   ? <><span className="ap__spinner" /> 处理中…</>
                   : `确认添加 ${pending.length} 张`}
               </button>
+              </div>
+              {status && (
+                <p className={status.type === 'err' ? 'ap__err' : 'ap__ok'}>{status.msg}</p>
+              )}
             </div>
-            {pending.length === 0 && status && (
-              <p className={status.type === 'err' ? 'ap__err' : 'ap__ok'}
-                style={{ marginTop: 8 }}>{status.msg}</p>
-            )}
-          </section>
-
-          {uploadedPhotos.length > 0 && (
-            <section className="ap__section">
-              <h3 className="ap__sec-title">
-                已上传 <span className="ap__count">{uploadedPhotos.length}</span>
-              </h3>
-              <ul className="ap__list">
-                {uploadedPhotos.map(p => (
-                  <li key={p.id} className="ap__item">
-                    <div className="ap__item-thumb"><img src={p.src} alt={p.title} loading="lazy" /></div>
-                    <div className="ap__item-info">
-                      <span className="ap__item-title">{p.title}</span>
-                      <span className="ap__item-meta">{[p.location, p.year, p.span].filter(Boolean).join(' · ')}</span>
-                    </div>
-                    <button className="ap__item-del" onClick={() => handleDelete(p)} aria-label={`删除 ${p.title}`}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14H6L5 6" />
-                        <path d="M10 11v6M14 11v6M9 6V4h6v2" />
-                      </svg>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          </aside>
         </div>
-      </aside>
-    </>
+      ) : (
+        <div className="apf__main apf__main--single">
+          <section className="apf__pane">
+            <div className="apf__pane-head">
+              <span className="apf__pane-title">已发布</span>
+              <span className="apf__hint">共 {uploadedPhotos.length} 张 · 星标为首屏背景</span>
+            </div>
+            <div className="apf__pane-body">
+              {status && (
+                <p className={status.type === 'err' ? 'ap__err' : 'ap__ok'}
+                  style={{ marginBottom: 12 }}>{status.msg}</p>
+              )}
+              {uploadedPhotos.length === 0 ? (
+                <p className="apf__empty">还没有通过面板发布的作品</p>
+              ) : (
+                <ul className="ap__list">
+                  {uploadedPhotos.map((p, i) => {
+                    const isCover = p.cover || (!uploadedPhotos.some(x => x.cover) && i === 0);
+                    return (
+                    <li key={p.id} className="ap__item">
+                      <div className="ap__item-thumb"><img src={p.src} alt={p.title} loading="lazy" /></div>
+                      <div className="ap__item-info">
+                        <span className="ap__item-title">{p.title}</span>
+                        <span className="ap__item-meta">
+                          {[p.location, p.year, p.span].filter(Boolean).join(' · ')}
+                          {isCover && <span className="ap__cover-tag">首屏背景</span>}
+                        </span>
+                      </div>
+                      <button
+                        className={`ap__item-star ${isCover ? 'ap__item-star--on' : ''}`}
+                        onClick={() => void handleSetCover(p)}
+                        disabled={coverBusy !== null || Boolean(p.cover)}
+                        title={p.cover ? '当前首屏背景' : '设为首屏背景'}
+                        aria-label={p.cover ? '当前首屏背景' : `把 ${p.title} 设为首屏背景`}
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24"
+                          fill={isCover ? 'currentColor' : 'none'}
+                          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="12 3 14.9 9.2 21.5 10 16.7 14.6 17.9 21.2 12 18 6.1 21.2 7.3 14.6 2.5 10 9.1 9.2" />
+                        </svg>
+                      </button>
+                      <button className="ap__item-del" onClick={() => handleDelete(p)} aria-label={`删除 ${p.title}`}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                          <path d="M10 11v6M14 11v6M9 6V4h6v2" />
+                        </svg>
+                      </button>
+                    </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
   );
 }

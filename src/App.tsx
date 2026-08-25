@@ -6,7 +6,7 @@ import { Lightbox } from './Lightbox';
 import { AdminPanel } from './AdminPanel';
 
 export default function App() {
-  const { photos, uploadedPhotos, addPhotos, removePhoto } = usePhotos();
+  const { photos, coverPhoto, addPhotos, removePhoto, setCover } = usePhotos();
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
   const [page,      setPage]      = useState<'gallery' | 'about'>('gallery');
   const [scrolled,  setScrolled]  = useState(false);
@@ -54,7 +54,7 @@ export default function App() {
     hero.addEventListener('mousemove', onMove);
     hero.addEventListener('mouseleave', onLeave);
     return () => { hero.removeEventListener('mousemove', onMove); hero.removeEventListener('mouseleave', onLeave); };
-  }, [page]);
+  }, [page, coverPhoto?.src]);
 
   useEffect(() => {
     const bg = bgRef.current;
@@ -72,7 +72,7 @@ export default function App() {
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => { window.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf); };
-  }, [page]);
+  }, [page, coverPhoto?.src]);
 
   return (
     <div className="app">
@@ -107,8 +107,10 @@ export default function App() {
         {page === 'gallery' ? (
           <>
             <section className="hero" ref={heroRef} aria-label="封面">
-              <img ref={bgRef} src="https://picsum.photos/seed/hero_main/2000/1200"
-                alt="" aria-hidden="true" className="hero__bg" />
+              {coverPhoto && (
+                <img ref={bgRef} src={coverPhoto.src}
+                  alt="" aria-hidden="true" className="hero__bg" />
+              )}
               <div className="hero__veil" />
               <div className="hero__body">
                 <div className="hero__tag">Personal Photography · 2022–2024</div>
@@ -134,20 +136,28 @@ export default function App() {
             </section>
 
             <section className="gallery" aria-label="摄影作品">
-              <div className="bento">
-                {photos.map((photo, i) => (
-                  <PhotoCard key={photo.id} photo={photo} index={i}
-                    onClick={() => openLightbox(photo)} />
-                ))}
-              </div>
+              {photos.length === 0 ? (
+                <p className="gallery__empty">
+                  还没有作品。点右下角的按钮上传，或从 Cloudinary 导入。
+                </p>
+              ) : (
+                <div className="bento">
+                  {photos.map((photo, i) => (
+                    <PhotoCard key={photo.id} photo={photo} index={i}
+                      onClick={() => openLightbox(photo)} />
+                  ))}
+                </div>
+              )}
             </section>
           </>
         ) : (
           <section className="about">
             <div className="about__split">
               <div className="about__visual">
-                <img src="https://picsum.photos/seed/about_me/900/1100"
-                  alt="摄影师" className="about__photo" />
+                {coverPhoto
+                  ? <img src={coverPhoto.src} alt={coverPhoto.title} className="about__photo" />
+                  : <div className="about__photo about__photo--empty" aria-hidden="true" />
+                }
                 <div className="about__visual-tag">Since 2020</div>
               </div>
               <div className="about__text">
@@ -195,16 +205,14 @@ export default function App() {
           <polyline points="17 8 12 3 7 8" />
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
-        {uploadedPhotos.length > 0 && (
-          <span className="admin-fab__badge">{uploadedPhotos.length}</span>
-        )}
       </button>
 
       {adminOpen && (
         <AdminPanel
-          uploadedPhotos={uploadedPhotos}
+          uploadedPhotos={photos}
           onAdd={addPhotos}
           onDelete={removePhoto}
+          onSetCover={setCover}
           onClose={() => setAdminOpen(false)}
         />
       )}
