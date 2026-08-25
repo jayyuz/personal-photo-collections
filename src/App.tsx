@@ -6,7 +6,7 @@ import { Lightbox } from './Lightbox';
 import { AdminPanel } from './AdminPanel';
 
 export default function App() {
-  const { photos, uploadedPhotos, addPhoto, removePhoto } = usePhotos();
+  const { photos, uploadedPhotos, addPhotos, removePhoto } = usePhotos();
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
   const [page,      setPage]      = useState<'gallery' | 'about'>('gallery');
   const [scrolled,  setScrolled]  = useState(false);
@@ -203,7 +203,7 @@ export default function App() {
       {adminOpen && (
         <AdminPanel
           uploadedPhotos={uploadedPhotos}
-          onAdd={addPhoto}
+          onAdd={addPhotos}
           onDelete={removePhoto}
           onClose={() => setAdminOpen(false)}
         />

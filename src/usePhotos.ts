@@ -40,9 +40,10 @@ export function usePhotos() {
   }, []);
 
   const addPhoto    = (p: Photo) => setUploaded(prev => [p, ...prev]);
+  const addPhotos   = (list: Photo[]) => setUploaded(prev => [...list, ...prev]);
   const removePhoto = (id: string) => setUploaded(prev => prev.filter(p => p.id !== id));
 
   const photos = [...uploadedPhotos, ...PHOTOS];
 
-  return { photos, uploadedPhotos, addPhoto, removePhoto };
+  return { photos, uploadedPhotos, addPhoto, addPhotos, removePhoto };
 }
