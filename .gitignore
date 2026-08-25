@@ -1,0 +1,33 @@
+# 依赖目录
+node_modules/
+pnpm-lock.yaml
+yarn.lock
+
+# 构建输出
+dist/
+dist-ssr/
+*.local
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志
+logs/
+*.log
+npm-debug.log*
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# QPilot 系统目录
+.claude/
