@@ -38,7 +38,7 @@ export function PhotoCard({ photo, onClick, index }: PhotoCardProps) {
     <div
       ref={ref}
       className={`card ${spanClass} ${visible ? 'card--visible' : ''}`}
-      style={{ '--delay': `${(index % 8) * 55}ms`, '--tint': photo.tint } as React.CSSProperties}
+      style={{ '--delay': `${(index % 8) * 55}ms` } as React.CSSProperties}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -57,7 +57,6 @@ export function PhotoCard({ photo, onClick, index }: PhotoCardProps) {
           />
         )}
       </div>
-      <div className="card__tint" aria-hidden="true" />
       <div className="card__info">
         <span className="card__title">{photo.title}</span>
         {(photo.location || photo.year) && (
