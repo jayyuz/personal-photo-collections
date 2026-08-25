@@ -265,9 +265,17 @@ function repoParts(cfg: AdminConfig): [string, string] {
 
 async function fetchPhotosMeta(cfg: AdminConfig): Promise<{ photos: ApiPhoto[]; sha: string }> {
   const [owner, repo] = repoParts(cfg);
+  // 不能吃缓存：拿到旧的 sha 会让后续写入直接 409，或覆盖掉别处的改动
   const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${PHOTOS_PATH}`,
-    { headers: { Authorization: `Bearer ${cfg.githubToken}`, Accept: 'application/vnd.github.v3+json' } }
+    `https://api.github.com/repos/${owner}/${repo}/contents/${PHOTOS_PATH}?t=${Date.now()}`,
+    {
+      cache: 'no-store',
+      headers: {
+        Authorization: `Bearer ${cfg.githubToken}`,
+        Accept: 'application/vnd.github.v3+json',
+        'If-None-Match': '',
+      },
+    }
   );
   if (res.status === 404) return { photos: [], sha: '' };
   if (!res.ok) {

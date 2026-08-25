@@ -32,14 +32,37 @@ export function toPhoto(p: ApiPhoto): Photo {
   };
 }
 
+/**
+ * photos.json 是管理面板随时改写的静态文件，浏览器 HTTP 缓存和 Pages 的 CDN
+ * 都会按静态资源缓存它。no-store 绕过浏览器缓存，时间戳让 CDN 的缓存键失效，
+ * 两者都需要：只有 no-store 时 CDN 仍可能回旧内容。
+ */
+function photosUrl() {
+  return `${import.meta.env.BASE_URL}photos.json?t=${Date.now()}`;
+}
+
 export function usePhotos() {
   const [photos, setPhotos] = useState<Photo[]>([]);
 
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}photos.json`)
-      .then(r => r.ok ? r.json() : [])
-      .then((data: ApiPhoto[]) => setPhotos(data.map(toPhoto)))
-      .catch(() => {});
+    let cancelled = false;
+    const load = () => {
+      fetch(photosUrl(), { cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : []))
+        .then((data: ApiPhoto[]) => {
+          if (!cancelled && Array.isArray(data)) setPhotos(data.map(toPhoto));
+        })
+        .catch(() => {});
+    };
+    load();
+
+    // 回到页面时重新拉一次，刚发布的照片不用手动刷新就能看到
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const addPhotos   = (list: Photo[]) => setPhotos(prev => [...list, ...prev]);
