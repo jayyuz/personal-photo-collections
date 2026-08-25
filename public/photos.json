@@ -6,7 +6,8 @@
     "span": "big",
     "location": "深圳植物园",
     "year": 2026,
-    "tint": "rgba(220,80,60,0.25)"
+    "tint": "rgba(220,80,60,0.25)",
+    "cover": true
   },
   {
     "id": "1787666285862-4hnzo",
@@ -15,8 +16,7 @@
     "span": "wide",
     "location": "深圳植物园",
     "year": 2026,
-    "tint": "rgba(220,80,60,0.25)",
-    "cover": true
+    "tint": "rgba(220,80,60,0.25)"
   },
   {
     "id": "1787666286556-yxjg8",
