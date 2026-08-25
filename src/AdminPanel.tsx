@@ -266,7 +266,10 @@ async function fetchPhotosMeta(cfg: AdminConfig): Promise<{ photos: ApiPhoto[]; 
     { headers: { Authorization: `Bearer ${cfg.githubToken}`, Accept: 'application/vnd.github.v3+json' } }
   );
   if (res.status === 404) return { photos: [], sha: '' };
-  if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null))?.message as string | undefined;
+    throw new Error(detail || `读取 photos.json 失败（HTTP ${res.status}）`);
+  }
   const data = await res.json();
   const content = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
   return { photos: JSON.parse(content), sha: data.sha };
@@ -292,12 +295,25 @@ async function savePhotosMeta(photos: ApiPhoto[], cfg: AdminConfig, message: str
       body: JSON.stringify(body),
     }
   );
+  if (res.ok) return;
+
+  const detail = (await res.json().catch(() => null))?.message as string | undefined;
   if (res.status === 404) {
     throw new Error(
       `写入 ${owner}/${repo} 失败（404）。请确认仓库名正确、Token 属于该仓库的账号，且勾选了 repo 权限。`
     );
   }
-  if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+  if (res.status === 403 || res.status === 401) {
+    // 读取公开仓库不需要授权，所以能读不能写基本都是 Token 权限不足
+    const needed = res.headers.get('x-accepted-github-permissions');
+    throw new Error(
+      `Token 没有写入 ${owner}/${repo} 的权限（HTTP ${res.status}${detail ? `：${detail}` : ''}）。` +
+      `Classic Token 需要勾选 repo；Fine-grained Token 需要把该仓库加入 Repository access，` +
+      `并把 Contents 设为 Read and write。` +
+      (needed ? `（GitHub 要求：${needed}）` : '')
+    );
+  }
+  throw new Error(detail || `写入失败（HTTP ${res.status}）`);
 }
 
 const DEFAULT_CONFIG: AdminConfig = {
@@ -590,6 +606,12 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onClose }: AdminPa
                     {f.key === 'githubRepo' && (
                       <span className="ap__field-help">
                         只填 <strong>owner/repo</strong>，例如 jayyuz/personal-photo-collections，不要填完整网址。
+                      </span>
+                    )}
+                    {f.key === 'githubToken' && (
+                      <span className="ap__field-help">
+                        需要写入权限：Classic Token 勾选 <strong>repo</strong>；
+                        Fine-grained Token 要把本仓库加进 Repository access，并把 Contents 设为 <strong>Read and write</strong>。
                       </span>
                     )}
                     {f.key === 'cloudName' && (
