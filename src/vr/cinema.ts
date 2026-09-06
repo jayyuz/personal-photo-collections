@@ -36,17 +36,18 @@ export interface CinemaHandle {
 /** 尺寸和手感都放这儿，方便按 Pico 上的实际观感微调（单位：米） */
 const CFG = {
   room:      { w: 26, h: 9,  d: 34 },
-  screen:    { z: -10, y: 3.8, w: 12, h: 5.4 },
-  photo:     { maxW: 11.2, maxH: 4.9 },
+  // 控制照片的视角大小。太大时头显每度像素不够，照片会明显输给 Pico 浏览器的 2D compositor。
+  screen:    { z: -10, y: 3.55, w: 9.6, h: 5.4 },
+  photo:     { maxW: 9.0, maxH: 4.9 },
   zoomMax:   6,
   zoomSpeed: 1.5,
-  hud:       { w: 8, y: 0.5, z: -9.4, tilt: -0.12 },
+  hud:       { w: 7.2, y: 0.5, z: -9.4, tilt: -0.12 },
   exitHoldMs: 900,
   /** 画质相关 */
   // three 默认 foveation = 1（边缘低分辨率），银幕铺满视野时正好糊在边缘上，关掉
   foveation:   0,
   // 渲染分辨率倍率：照片是静态内容，适当提高倍率比默认 WebXR framebuffer 更接近 Pico 浏览器直看效果
-  renderScale: 1.5,
+  renderScale: 1.7,
   // 站点上的图是 w_1600，放在 VR 大银幕上像素不够；主图按最长边加载。
   photoSize:   4096,
   // q_auto 在大屏上压得太狠，明确给高质量
