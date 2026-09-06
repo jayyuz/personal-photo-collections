@@ -45,8 +45,8 @@ const CFG = {
   /** 画质相关 */
   // three 默认 foveation = 1（边缘低分辨率），银幕铺满视野时正好糊在边缘上，关掉
   foveation:   0,
-  // 渲染分辨率倍率：不低于这个值，并尽量贴近头显原生分辨率（上限 2 防止过热掉帧）
-  renderScale: 1.2,
+  // 渲染分辨率倍率：照片是静态内容，适当提高倍率比默认 WebXR framebuffer 更接近 Pico 浏览器直看效果
+  renderScale: 1.5,
   // 站点上的图是 w_1600，放在 VR 大银幕上像素不够；主图按最长边加载。
   photoSize:   4096,
   // q_auto 在大屏上压得太狠，明确给高质量
@@ -301,8 +301,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const prepare = (tex: THREE.Texture) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = maxAniso;
-    tex.generateMipmaps = false;
-    tex.minFilter  = THREE.LinearFilter;
+    // 主图纹理大多处于缩小采样；不用 mipmap 会更“硬”，但细线和纹理会产生摩尔纹。
+    tex.generateMipmaps = true;
+    tex.minFilter  = THREE.LinearMipmapLinearFilter;
     tex.magFilter  = THREE.LinearFilter;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     return tex;
