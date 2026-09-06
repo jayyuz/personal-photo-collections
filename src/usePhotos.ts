@@ -69,8 +69,11 @@ export function usePhotos() {
   const removePhoto = (id: string) => setPhotos(prev => prev.filter(p => p.id !== id));
   const setCover    = (id: string) =>
     setPhotos(prev => prev.map(p => ({ ...p, cover: p.id === id || undefined })));
+  /** 按 id 就地替换，用于重排布局这类只改字段的批量更新 */
+  const updatePhotos = (list: Photo[]) =>
+    setPhotos(prev => prev.map(p => list.find(n => n.id === p.id) ?? p));
 
   const coverPhoto = photos.find(p => p.cover) ?? photos[0];
 
-  return { photos, coverPhoto, addPhotos, removePhoto, setCover };
+  return { photos, coverPhoto, addPhotos, removePhoto, setCover, updatePhotos };
 }

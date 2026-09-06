@@ -8,17 +8,19 @@
  *
  * 配置存 localStorage，Token 不进源码。
  */
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import type { Photo, PhotoExif, PhotoSpan } from './data';
 import { toPhoto } from './usePhotos';
 import { readExif, readExifFromUrl } from './exif';
+import {
+  SPAN_LABEL, SPAN_OPTIONS, sizeFromFile, sizeFromExif, sizeFromSrc, spanFromSize,
+  type ImageSize,
+} from './layout';
+import { packPhotos, useGridColumns } from './pack';
 
-const SPAN_OPTS: { value: PhotoSpan; label: string }[] = [
-  { value: 'normal', label: '普通 1×1' },
-  { value: 'wide',   label: '宽幅 2×1' },
-  { value: 'tall',   label: '高幅 1×2' },
-  { value: 'big',    label: '大图 2×2' },
-];
+/** 并发上限，避免一次把几十张图同时拉下来 */
+const PROBE_CONCURRENCY = 6;
+
 const TINT_OPTS = [
   { label: '人物 · 暖红',  value: 'rgba(220,80,60,0.25)'    },
   { label: '人文 · 琥珀',  value: 'rgba(200,120,20,0.22)'   },
@@ -52,7 +54,6 @@ interface CloudAsset {
 interface FormState {
   location: string;
   year:     string;
-  span:     PhotoSpan;
   tint:     string;
 }
 interface ApiPhoto {
@@ -67,6 +68,33 @@ interface PendingItem {
   base64:     string | null;
   remoteUrl:  string | null;
   exif?:      PhotoExif;
+  /** 实测宽高，用来判定布局 */
+  size?:      ImageSize;
+  /** 手动指定的布局；undefined 表示跟随自动判定 */
+  span?:      PhotoSpan;
+}
+
+/** 每张图最终采用的布局：手动覆盖优先，否则按宽高比判定 */
+function spanOf(item: PendingItem): PhotoSpan {
+  return item.span ?? spanFromSize(item.size);
+}
+
+/** 有限并发地跑异步任务，保持顺序不变 */
+async function mapPool<T, R>(
+  items: T[], limit: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      out[i] = await task(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 function safeB64Encode(str: string): string {
@@ -334,7 +362,7 @@ const DEFAULT_CONFIG: AdminConfig = {
 };
 const DEFAULT_FORM: FormState = {
   location: '', year: String(new Date().getFullYear()),
-  span: 'normal', tint: TINT_OPTS[0].value,
+  tint: TINT_OPTS[0].value,
 };
 
 const CFG_FIELDS: { key: keyof AdminConfig; label: string; placeholder: string; type: 'text' | 'password' }[] = [
@@ -352,10 +380,13 @@ interface AdminPanelProps {
   onAdd:      (photos: Photo[]) => void;
   onDelete:   (id: string) => void;
   onSetCover: (id: string) => void;
+  onUpdate:   (photos: Photo[]) => void;
   onClose:    () => void;
 }
 
-export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClose }: AdminPanelProps) {
+export function AdminPanel({
+  uploadedPhotos, onAdd, onDelete, onSetCover, onUpdate, onClose,
+}: AdminPanelProps) {
   const [cfg, setCfg] = useState<AdminConfig>(() => {
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem(LS_CONFIG_KEY) || '{}') }; }
     catch { return DEFAULT_CONFIG; }
@@ -434,7 +465,9 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
     }
     if (!ok.length) return;
     const items: PendingItem[] = await Promise.all(ok.map(async file => {
-      const [dataUrl, exif] = await Promise.all([readFileAsDataUrl(file), readExif(file)]);
+      const [dataUrl, exif, measured] = await Promise.all([
+        readFileAsDataUrl(file), readExif(file), sizeFromFile(file),
+      ]);
       return {
         localId:   newLocalId(),
         title:     titleFromName(file.name),
@@ -442,6 +475,7 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
         base64:    dataUrl,
         remoteUrl: null,
         exif,
+        size:      measured ?? sizeFromExif(exif),
       };
     }));
     appendPending(items);
@@ -457,13 +491,15 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
       setStatus({ type: 'ok', msg: '正在从网络图片读取 EXIF…' });
       const items = await Promise.all(urls.map(async url => {
         const optimized = optimizeCloudinaryUrl(url);
+        const exif = await readExifFromUrl(url);
         return {
           localId:   newLocalId(),
           title:     titleFromName(decodeURIComponent(url.split('/').pop() || 'photo')),
           preview:   optimized,
           base64:    null,
           remoteUrl: optimized,
-          exif:      await readExifFromUrl(url),
+          exif,
+          size:      await sizeFromSrc(optimized) ?? sizeFromExif(exif),
         };
       }));
       appendPending(items);
@@ -509,14 +545,18 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
     }
     void (async () => {
       setStatus({ type: 'ok', msg: `正在从 ${selected.length} 张网络图片读取 EXIF…` });
-      const items = await Promise.all(selected.map(async a => ({
-        localId:   newLocalId(),
-        title:     a.title,
-        preview:   a.url,
-        base64:    null,
-        remoteUrl: a.url,
-        exif:      await readExifFromUrl(a.url),
-      })));
+      const items = await Promise.all(selected.map(async a => {
+        const exif = await readExifFromUrl(a.url);
+        return {
+          localId:   newLocalId(),
+          title:     a.title,
+          preview:   a.url,
+          base64:    null,
+          remoteUrl: a.url,
+          exif,
+          size:      await sizeFromSrc(a.url) ?? sizeFromExif(exif),
+        };
+      }));
       appendPending(items);
       setLibrary(prev => prev.filter(a => !picked.has(a.publicId)));
       setPicked(new Set());
@@ -608,7 +648,7 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
           id:       newLocalId(),
           title:    item.title.trim(),
           src,
-          span:     form.span,
+          span:     spanOf(item),
           location: form.location.trim() || undefined,
           year:     Number(form.year) || undefined,
           tint:     form.tint,
@@ -632,7 +672,104 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
     }
   };
 
-  const [coverBusy, setCoverBusy] = useState<string | null>(null);
+  const [coverBusy,  setCoverBusy]  = useState<string | null>(null);
+  const [relayouting, setRelayouting] = useState(false);
+
+  const gridCols  = useGridColumns();
+  const gridStats = useMemo(
+    () => packPhotos(uploadedPhotos, gridCols), [uploadedPhotos, gridCols]
+  );
+
+  /**
+   * 按真实宽高比重排已发布的布局。
+   * 有 EXIF 尺寸的直接算；没有的把图下载下来实测，
+   * 测不出来的保持原样不动，全部算完再让用户确认是否写回。
+   */
+  const handleRelayout = async () => {
+    if (!isGithubOk) { setStatus({ type: 'err', msg: '请先填写 GitHub 仓库和 Token' }); return; }
+    setRelayouting(true);
+    setStatus({ type: 'ok', msg: '正在读取 photos.json…' });
+    try {
+      const { photos: current } = await fetchPhotosMeta(cfg);
+      if (!current.length) { setStatus({ type: 'err', msg: 'photos.json 里还没有照片' }); return; }
+
+      let done = 0;
+      const sizes = await mapPool(current, PROBE_CONCURRENCY, async p => {
+        // 已有 EXIF 尺寸就别再下载一遍；缺失时才回源实测
+        const size = sizeFromExif(p.exif) ?? await sizeFromSrc(p.src);
+        done += 1;
+        setStatus({ type: 'ok', msg: `正在读取尺寸 ${done}/${current.length}…` });
+        return size;
+      });
+
+      const changed: { photo: ApiPhoto; to: PhotoSpan; size: ImageSize }[] = [];
+      const onlySize: { photo: ApiPhoto; size: ImageSize }[] = [];
+      const unknown: string[] = [];
+
+      current.forEach((p, i) => {
+        const size = sizes[i];
+        if (!size) { unknown.push(p.title); return; }
+        const to = spanFromSize(size);
+        const from = (p.span as PhotoSpan) || 'normal';
+        const lacksSize = !p.exif?.width || !p.exif?.height;
+        if (to !== from) changed.push({ photo: p, to, size });
+        else if (lacksSize) onlySize.push({ photo: p, size });
+      });
+
+      if (!changed.length && !onlySize.length) {
+        setStatus({
+          type: 'ok',
+          msg: unknown.length
+            ? `布局都已和宽高比一致；${unknown.length} 张读不到尺寸，保持原样。`
+            : '所有照片的布局都已和宽高比一致，无需改动。',
+        });
+        return;
+      }
+
+      const tally = new Map<PhotoSpan, number>();
+      for (const c of changed) tally.set(c.to, (tally.get(c.to) ?? 0) + 1);
+      const summary = [...tally].map(([span, n]) => `${SPAN_LABEL[span]} ${n}`).join(' · ');
+      const preview = changed.slice(0, 5)
+        .map(c => `「${c.photo.title}」${(c.photo.span as PhotoSpan) || 'normal'} → ${c.to}`)
+        .join('\n');
+
+      const ok = window.confirm(
+        `将调整 ${changed.length} 张的布局：\n${summary || '（无）'}\n\n` +
+        (preview ? `例如：\n${preview}${changed.length > 5 ? '\n…' : ''}\n\n` : '\n') +
+        (onlySize.length ? `另有 ${onlySize.length} 张布局不变，仅补记尺寸。\n` : '') +
+        (unknown.length ? `有 ${unknown.length} 张读不到尺寸，将保持原样：${unknown.slice(0, 5).join('、')}${unknown.length > 5 ? '…' : ''}\n` : '') +
+        `\n确认写入 photos.json？`
+      );
+      if (!ok) { setStatus({ type: 'ok', msg: '已取消，没有改动。' }); return; }
+
+      setStatus({ type: 'ok', msg: '同步到 GitHub…' });
+      const byId = new Map<string, { to?: PhotoSpan; size: ImageSize }>();
+      for (const c of changed)  byId.set(c.photo.id, { to: c.to, size: c.size });
+      for (const s of onlySize) byId.set(s.photo.id, { size: s.size });
+
+      const next = current.map(p => {
+        const hit = byId.get(p.id);
+        if (!hit) return p;
+        // 顺手把测到的尺寸补进 EXIF，下次不用再下载
+        const exif = { ...(p.exif ?? {}), width: hit.size.width, height: hit.size.height };
+        return { ...p, span: hit.to ?? p.span, exif };
+      });
+
+      await savePhotosMeta(next, cfg, `🔀 Relayout ${changed.length} photo(s) by aspect ratio`);
+      const updated = next.filter(p => byId.has(p.id));
+      onUpdate(updated.map(toPhoto));
+      setStatus({
+        type: 'ok',
+        msg: `已重排 ${changed.length} 张布局${onlySize.length ? `，补记 ${onlySize.length} 张尺寸` : ''}。` +
+             (unknown.length ? ` ${unknown.length} 张读不到尺寸，未改动。` : '') +
+             ' GitHub Actions 约 1–2 分钟后生效。',
+      });
+    } catch (e) {
+      setStatus({ type: 'err', msg: String(e instanceof Error ? e.message : e) });
+    } finally {
+      setRelayouting(false);
+    }
+  };
 
   const handleSetCover = async (photo: Photo) => {
     if (!isGithubOk) { setStatus({ type: 'err', msg: '请先填写 GitHub 仓库和 Token' }); return; }
@@ -908,18 +1045,43 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
                       <img src={item.preview} alt="" />
                       {item.remoteUrl && <span className="ap__queue-badge">链接</span>}
                     </div>
-                    <label className="ap__label ap__queue-title">
-                      标题 {pending.length > 1 ? `${i + 1}` : ''} <span className="ap__required">*</span>
-                      <input
-                        className="ap__input"
-                        value={item.title}
-                        onChange={e => setPending(prev =>
-                          prev.map(p => p.localId === item.localId ? { ...p, title: e.target.value } : p)
-                        )}
-                        placeholder="这张照片叫什么"
-                        maxLength={40}
-                      />
-                    </label>
+                    <div className="ap__queue-main">
+                      <label className="ap__label ap__queue-title">
+                        标题 {pending.length > 1 ? `${i + 1}` : ''} <span className="ap__required">*</span>
+                        <input
+                          className="ap__input"
+                          value={item.title}
+                          onChange={e => setPending(prev =>
+                            prev.map(p => p.localId === item.localId ? { ...p, title: e.target.value } : p)
+                          )}
+                          placeholder="这张照片叫什么"
+                          maxLength={40}
+                        />
+                      </label>
+                      <div className="ap__queue-foot">
+                        <span className="ap__queue-dim">
+                          {item.size ? `${item.size.width}×${item.size.height}` : '尺寸未测出'}
+                        </span>
+                        <select
+                          className="ap__queue-span"
+                          value={item.span ?? 'auto'}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setPending(prev => prev.map(p =>
+                              p.localId === item.localId
+                                ? { ...p, span: v === 'auto' ? undefined : v as PhotoSpan }
+                                : p
+                            ));
+                          }}
+                          aria-label={`${item.title || '这张图'} 的布局`}
+                        >
+                          <option value="auto">自动 · {SPAN_LABEL[spanFromSize(item.size)]}</option>
+                          {SPAN_OPTIONS.map(o => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                     <button
                       type="button"
                       className="ap__item-del"
@@ -939,7 +1101,9 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
 
             <div className="apf__rail-foot">
               <div className={`ap__form ${pending.length === 0 ? 'ap__form--hidden' : ''}`}>
-              <p className="apf__hint" style={{ marginBottom: 10 }}>以下对这一批共用</p>
+              <p className="apf__hint" style={{ marginBottom: 10 }}>
+                以下对这一批共用 · 布局按每张图宽高比自动判定
+              </p>
               <div className="ap__row">
                 <label className="ap__label">
                   拍摄地点
@@ -954,18 +1118,6 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
                     min={2000} max={2099} style={{ width: 90 }} />
                 </label>
               </div>
-              <label className="ap__label">
-                布局大小
-                <div className="ap__span-grid">
-                  {SPAN_OPTS.map(o => (
-                    <button key={o.value} type="button"
-                      className={`ap__span-btn ${form.span === o.value ? 'ap__span-btn--active' : ''}`}
-                      onClick={() => setForm(f => ({ ...f, span: o.value }))}>
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-              </label>
               <label className="ap__label">
                 色调氛围
                 <div className="ap__tint-grid">
@@ -996,7 +1148,18 @@ export function AdminPanel({ uploadedPhotos, onAdd, onDelete, onSetCover, onClos
           <section className="apf__pane">
             <div className="apf__pane-head">
               <span className="apf__pane-title">已发布</span>
-              <span className="apf__hint">共 {uploadedPhotos.length} 张 · 星标为首屏背景</span>
+              <div className="apf__pane-acts">
+                <span className="apf__hint">
+                  共 {uploadedPhotos.length} 张 · {gridCols} 列 ·
+                  {gridStats.holes ? `仍有 ${gridStats.holes} 个空位` : '密铺无空洞'} · 星标为首屏背景
+                </span>
+                <button type="button" className="apf__mini"
+                  onClick={() => void handleRelayout()}
+                  disabled={relayouting || !uploadedPhotos.length}
+                  title="按每张图的宽高比重新判定布局，缺尺寸的会下载原图实测">
+                  {relayouting ? '正在读取尺寸…' : '按宽高比重排'}
+                </button>
+              </div>
             </div>
             <div className="apf__pane-body">
               {status && (

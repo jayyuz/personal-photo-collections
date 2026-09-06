@@ -1,12 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { usePhotos } from './usePhotos';
 import type { Photo } from './data';
 import { PhotoCard } from './PhotoCard';
 import { Lightbox } from './Lightbox';
 import { AdminPanel } from './AdminPanel';
+import { packPhotos, useGridColumns } from './pack';
 
 export default function App() {
-  const { photos, coverPhoto, addPhotos, removePhoto, setCover } = usePhotos();
+  const { photos, coverPhoto, addPhotos, removePhoto, setCover, updatePhotos } = usePhotos();
+  const columns = useGridColumns();
+  // 密铺后的展示顺序；原顺序仍留在 photos 里，作为策展顺序
+  const gallery = useMemo(() => packPhotos(photos, columns).order, [photos, columns]);
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
   const [page,      setPage]      = useState<'gallery' | 'about'>('gallery');
   const [scrolled,  setScrolled]  = useState(false);
@@ -16,15 +20,16 @@ export default function App() {
   const bgRef   = useRef<HTMLImageElement>(null);
   const mouseOff = useRef({ x: 0, y: 0 });
 
-  const currentIndex = lightboxPhoto ? photos.indexOf(lightboxPhoto) : -1;
+  // 翻页跟着视觉顺序走，左右键就是眼睛看到的相邻两张
+  const currentIndex = lightboxPhoto ? gallery.indexOf(lightboxPhoto) : -1;
   const openLightbox  = useCallback((p: Photo) => setLightboxPhoto(p), []);
   const closeLightbox = useCallback(() => setLightboxPhoto(null), []);
   const prevPhoto = useCallback(() => {
-    if (currentIndex > 0) setLightboxPhoto(photos[currentIndex - 1]);
-  }, [currentIndex, photos]);
+    if (currentIndex > 0) setLightboxPhoto(gallery[currentIndex - 1]);
+  }, [currentIndex, gallery]);
   const nextPhoto = useCallback(() => {
-    if (currentIndex < photos.length - 1) setLightboxPhoto(photos[currentIndex + 1]);
-  }, [currentIndex, photos]);
+    if (currentIndex < gallery.length - 1) setLightboxPhoto(gallery[currentIndex + 1]);
+  }, [currentIndex, gallery]);
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 40);
@@ -142,7 +147,7 @@ export default function App() {
                 </p>
               ) : (
                 <div className="bento">
-                  {photos.map((photo, i) => (
+                  {gallery.map((photo, i) => (
                     <PhotoCard key={photo.id} photo={photo} index={i}
                       onClick={() => openLightbox(photo)} />
                   ))}
@@ -213,6 +218,7 @@ export default function App() {
           onAdd={addPhotos}
           onDelete={removePhoto}
           onSetCover={setCover}
+          onUpdate={updatePhotos}
           onClose={() => setAdminOpen(false)}
         />
       )}
@@ -223,7 +229,7 @@ export default function App() {
         onPrev={prevPhoto}
         onNext={nextPhoto}
         hasPrev={currentIndex > 0}
-        hasNext={currentIndex < photos.length - 1}
+        hasNext={currentIndex < gallery.length - 1}
       />
     </div>
   );

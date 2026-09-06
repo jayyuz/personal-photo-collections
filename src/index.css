@@ -282,8 +282,14 @@ a       { color: inherit; text-decoration: none; }
 .ap__queue-thumb { position: relative; width: 56px; height: 56px; flex-shrink: 0; overflow: hidden; background: #111; }
 .ap__queue-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .ap__queue-badge { position: absolute; left: 0; bottom: 0; font-size: 9px; letter-spacing: 0.06em; padding: 1px 4px; background: rgba(8,8,8,0.75); color: var(--fg); }
+.ap__queue-main { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .ap__queue-title { min-width: 0; }
 .ap__queue-title .ap__input { width: 100%; }
+.ap__queue-foot { display: flex; align-items: center; gap: 8px; }
+.ap__queue-dim { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.625rem; letter-spacing: 0.08em; color: var(--muted); }
+.ap__queue-span { flex-shrink: 0; max-width: 130px; padding: 5px 6px; font-family: var(--f-body); font-size: 0.6875rem; letter-spacing: 0.04em; color: var(--fg); background: rgba(255,255,255,0.04); border: 1px solid var(--border); outline: none; transition: border-color 0.15s; }
+.ap__queue-span:focus { border-color: rgba(255,255,255,0.25); }
+.ap__queue-span option { background: #111; color: var(--fg); }
 .ap__drop { border: 1px dashed rgba(255,255,255,0.12); padding: 36px 20px; display: flex; flex-direction: column; align-items: center; gap: 10px; cursor: pointer; transition: border-color 0.2s, background 0.2s; background: rgba(255,255,255,0.02); }
 .ap__drop:hover, .ap__drop--over { border-color: rgba(255,255,255,0.28); background: rgba(255,255,255,0.04); }
 .ap__drop:focus-visible { outline: 1px solid var(--fg); outline-offset: 4px; }
@@ -296,10 +302,6 @@ a       { color: inherit; text-decoration: none; }
 .ap__input { background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--fg); padding: 9px 12px; font-family: var(--f-body); font-size: 0.875rem; outline: none; transition: border-color 0.15s; }
 .ap__input:focus { border-color: rgba(255,255,255,0.25); } .ap__input::placeholder { color: var(--muted); }
 .ap__row { display: flex; gap: 10px; } .ap__row .ap__label { flex: 1; }
-.ap__span-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
-.ap__span-btn { padding: 7px 0; font-size: 0.75rem; letter-spacing: 0.06em; color: var(--muted); border: 1px solid var(--border); background: rgba(255,255,255,0.02); transition: color 0.15s, border-color 0.15s, background 0.15s; }
-.ap__span-btn:hover { color: var(--fg); border-color: rgba(255,255,255,0.18); }
-.ap__span-btn--active { color: var(--bg); background: var(--fg); border-color: var(--fg); }
 .ap__tint-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .ap__tint-swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; transition: transform 0.15s, border-color 0.15s; }
 .ap__tint-swatch:hover { transform: scale(1.15); }
