@@ -47,20 +47,27 @@ const CFG = {
   /* ---------- 画质 ---------- */
   // three 默认 foveation = 1（边缘低分辨率），银幕铺满视野时正好糊在边缘上，关掉
   foveation:   0,
-  // 拿不到头显原生倍率时的兜底值。正常情况直接用 nativeScale：
-  // 超过原生只是白烧 GPU，一旦掉帧，合成器的重投影会把画面拖得更糊。
+  // 没有原生合成层时，眼缓冲就是画质瓶颈：它是一张覆盖 ~105° 的透视贴图，
+  // 中心角分辨率只有面板的 ~1/panelBoost。把渲染倍率往上顶，把中心密度提到面板水平。
+  eyeBoost:    1.35,
+  // 拿不到头显原生倍率时的兜底值
   renderScale: 1.4,
-  // 眼缓冲是一张覆盖 ~105° 的透视贴图，中心角分辨率低于面板本身；
-  // 原生合成层是直接按面板采样的，用这个系数把眼缓冲密度折算成面板密度。
+  // 眼缓冲中心密度 × panelBoost ≈ 面板密度。只有原生合成层（直接按面板采样）才用得上。
   panelBoost:  1.5,
-  // 纹理 / 合成层再多给一点余量，抵消合成器的双线性采样
-  superSample: 1.15,
-  // 只在这些档位向 Cloudinary 要图，避免缩放过程中反复回源
-  sourceSteps: [1024, 1408, 1792, 2304, 3072, 4096, MAX_CLOUDINARY_SIDE],
+  // 纹理比实际采样率略大一点，避免正好卡在 1:1 边界上；
+  // 注意别调大：超过 1 的部分就是缩小采样，正是摩尔纹的来源。
+  superSample: 1.06,
+  // 纹理尺寸量化到 128 的整数倍：既贴近实际占位，又能让 URL 稳定命中 CDN 缓存。
+  // 不能用粗档位（1024/1408/…）—— 占位 1000px 却抓 1408px，等于常驻 1.4× 缩小采样，
+  // mipmap 一介入就发虚，正好是要避免的那件事。
+  granularity: 128,
+  // 只有需求比已载入的大 20% 以上才回源，避免摇杆推一下就重下一张
+  refetchRatio: 1.2,
   // q_auto 在大屏上压得太狠，明确给高质量
   quality:     88,
-  // 下采样到目标尺寸后补一点锐度，抵消缩放与合成器采样的损失
-  sharpen:     60,
+  // 服务端下采样后补一点锐度。这个值不能大：锐化会把能量堆到 Nyquist 附近，
+  // 一旦有任何缩小采样就直接变成摩尔纹。
+  sharpen:     25,
 
   /** 悬浮照片墙 */
   picker: {
@@ -123,7 +130,21 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const { photos, onIndex, onExit, onError } = opts;
   if (!photos.length) throw new Error('没有可播放的照片');
 
-  const tryNativeLayers = new URLSearchParams(window.location.search).get('vrLayers') !== '0';
+  const params = new URLSearchParams(window.location.search);
+  const numParam = (key: string, min: number, max: number): number | null => {
+    const v = Number(params.get(key));
+    return Number.isFinite(v) && v >= min && v <= max ? v : null;
+  };
+
+  const tryNativeLayers = params.get('vrLayers') !== '0';
+  // 银幕的视角大小是清晰度最直接的杠杆：缩小 = 同样的像素铺更小的角度 = 更实。
+  // 挂 ?vrScreen=0.75 可以在头显里直接对比，不用改代码重新部署。
+  const screenScale = numParam('vrScreen', 0.4, 1.2) ?? 1;
+  const SCREEN_W = CFG.screen.w * screenScale;
+  const SCREEN_H = CFG.screen.h * screenScale;
+  const PHOTO_MAX_W = CFG.photo.maxW * screenScale;
+  const PHOTO_MAX_H = CFG.photo.maxH * screenScale;
+
   const optionalFeatures = ['local-floor', 'bounded-floor', 'hand-tracking'];
   if (tryNativeLayers) optionalFeatures.push('layers');
 
@@ -145,10 +166,22 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   // 关掉固定注视点渲染，整块银幕都按全分辨率画
   renderer.xr.setFoveation(CFG.foveation);
+
+  // 会不会走原生合成层，进 session 就能判断 —— 这决定了渲染倍率怎么取。
+  // 必须在 setSession 之前定下来：base layer 一旦建好，倍率就改不动了。
+  const layersEnabled = Boolean(
+    tryNativeLayers &&
+    session.enabledFeatures?.includes('layers') &&
+    typeof XRWebGLBinding !== 'undefined'
+  );
+
   const nativeScale = nativeScaleOf(session);
-  // 就按头显原生分辨率渲染。再往上加不会更清晰，只会掉帧，
-  // 而掉帧后合成器的重投影（ATW）会把整幅画面拖出拖影，反而更糊。
-  const framebufferScale = Math.min(2, nativeScale > 1 ? nativeScale : CFG.renderScale);
+  const scaleBase = nativeScale > 1 ? nativeScale : CFG.renderScale;
+  // 有原生合成层：照片不经过眼缓冲，按原生渲染就够，多给只是白烧 GPU。
+  // 没有合成层：照片要经眼缓冲重采样，而眼缓冲中心密度低于面板，
+  // 这时超采样是唯一能真正提清晰度的手段，值得付这份 GPU。
+  const framebufferScale = numParam('vrScale', 0.5, 2)
+    ?? Math.min(2, layersEnabled ? scaleBase : scaleBase * CFG.eyeBoost);
   renderer.xr.setFramebufferScaleFactor(framebufferScale);
 
   // local-floor 拿不到就退回 local，至少能进得去
@@ -163,10 +196,11 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
   const maxTexSize = renderer.capabilities.maxTextureSize || 4096;
   const maxSourceSide = Math.min(maxTexSize, MAX_CLOUDINARY_SIDE);
-  /** 把「想要多少像素」吸附到固定档位，避免缩放时一点点地反复回源 */
-  const sourceStep = (want: number): number => {
-    const steps = CFG.sourceSteps.filter(s => s <= maxSourceSide);
-    return steps.find(s => s >= want) ?? steps[steps.length - 1] ?? maxSourceSide;
+  /** 量化到 128 的整数倍，贴近实际占位又能稳定命中 CDN 缓存 */
+  const quantize = (want: number): number => {
+    const g = CFG.granularity;
+    const v = Math.ceil(Math.max(512, want) / g) * g;
+    return Math.min(maxSourceSide, v);
   };
   const vrSource = (src: string, size: number) =>
     cloudinaryFit(src, Math.min(size, maxSourceSide), CFG.quality, CFG.sharpen);
@@ -208,14 +242,14 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   /* ---------- 银幕 ---------- */
   const frame = new THREE.Mesh(
-    new THREE.PlaneGeometry(CFG.screen.w + 0.5, CFG.screen.h + 0.5),
+    new THREE.PlaneGeometry(SCREEN_W + 0.5, SCREEN_H + 0.5),
     new THREE.MeshBasicMaterial({ color: 0x000000 })
   );
   frame.position.set(0, CFG.screen.y, CFG.screen.z - 0.05);
   scene.add(frame);
 
   const border = new THREE.Mesh(
-    new THREE.PlaneGeometry(CFG.screen.w + 0.9, CFG.screen.h + 0.9),
+    new THREE.PlaneGeometry(SCREEN_W + 0.9, SCREEN_H + 0.9),
     new THREE.MeshBasicMaterial({ color: 0x1a1a1d })
   );
   border.position.set(0, CFG.screen.y, CFG.screen.z - 0.08);
@@ -225,7 +259,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const photoMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
   const photo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), photoMat);
   photo.position.set(0, CFG.screen.y, CFG.screen.z);
-  photo.scale.set(CFG.photo.maxW, CFG.photo.maxH, 1);
+  photo.scale.set(PHOTO_MAX_W, PHOTO_MAX_H, 1);
   scene.add(photo);
 
   /* ---------- 银幕下方的信息条 ---------- */
@@ -273,17 +307,22 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let disposed = false;
 
   /**
-   * 头显面板的角分辨率（像素 / 弧度）。
+   * 角分辨率（像素 / 弧度）—— 整件事的核心。
    *
-   * 这是整件事的核心：头显每度视野只有固定的物理像素（Pico 4 约 20 px/°），
-   * 银幕张开 48° 就只有 ~1000 px 可用 —— 再大的纹理也变不出像素来。
-   * 所有纹理 / 合成层尺寸都按这个值推，多要的部分纯属浪费带宽还会引入采样损失。
+   * 银幕张开约 48°，头显每度只有固定像素，所以银幕能用的像素数是有上限的，
+   * 再大的纹理也变不出像素来。纹理尺寸必须**贴着实际采样率**取：
+   *   取小了 → 放大插值，糊；
+   *   取大了 → 缩小采样，摩尔纹。
+   * 上一版就是错在这里：纹理按「面板密度」取，而 3D Plane 实际是在
+   * 「眼缓冲密度」上被采样的，两者差 1.5 倍，等于持续 1.5× 缩小采样 → 摩尔纹。
    *
-   * 投影矩阵 + 视口给出的是「眼缓冲」的中心密度，乘 panelBoost 折算到面板。
+   * 所以这里区分两个密度：
+   *   eye   — 投影矩阵实测，3D Plane 路径的真实采样率
+   *   panel — eye × panelBoost，原生合成层直接按面板采样时才用
    */
-  let panelPxPerRad = 0;
-  const measurePanelPxPerRad = (): number => {
-    if (panelPxPerRad) return panelPxPerRad;
+  let eyePxPerRad = 0;
+  const measureEyePxPerRad = (): number => {
+    if (eyePxPerRad) return eyePxPerRad;
     const eye = renderer.xr.getCamera().cameras[0] as
       | (THREE.PerspectiveCamera & { viewport?: THREE.Vector4 })
       | undefined;
@@ -291,16 +330,21 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     // p[0] = 2n/(r-l)，中心处 d(NDC)/d(角度)；再乘半个视口宽换成像素
     const p0 = eye?.projectionMatrix.elements[0] ?? 0;
     if (!(vpW > 0) || !(p0 > 0)) return 0;
-    panelPxPerRad = (p0 * vpW / 2) * CFG.panelBoost;
-    return panelPxPerRad;
+    eyePxPerRad = p0 * vpW / 2;
+    return eyePxPerRad;
   };
 
-  /** 宽 w 米、摆在银幕位置上的画面，在面板上大约横跨多少像素 */
-  const footprintPx = (w: number): number => {
-    const pxPerRad = measurePanelPxPerRad();
-    const rad = 2 * Math.atan(w / 2 / Math.abs(CFG.screen.z));
+  /** 银幕张开的水平弧度 */
+  const screenRad = (w: number) => 2 * Math.atan(w / 2 / Math.abs(CFG.screen.z));
+
+  /**
+   * 宽 w 米的画面横跨多少像素。
+   * forPanel=true 用于原生合成层（按面板密度），否则按眼缓冲实测密度。
+   */
+  const footprintPx = (w: number, forPanel = false): number => {
+    const pxPerRad = measureEyePxPerRad() * (forPanel ? CFG.panelBoost : 1);
     // 还没进第一帧、量不到时给个保守值，第一帧后会自动修正
-    return pxPerRad > 0 ? Math.round(rad * pxPerRad) : 1408;
+    return pxPerRad > 0 ? Math.round(screenRad(w) * pxPerRad) : 1408;
   };
 
   type PhotoLayerPainter = {
@@ -323,13 +367,16 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let photoLayerImageDirty = false;
   let photoLayerDirty = false;
   let layerPainter: PhotoLayerPainter | null = null;
-  let layersUsable = Boolean(tryNativeLayers && session.renderState.layers && typeof XRWebGLBinding !== 'undefined');
-  let layerStatus = tryNativeLayers
-    ? (layersUsable ? '等待创建 XRQuadLayer' : '浏览器未启用 WebXR Layers，使用 3D Plane 回退')
-    : 'URL 指定 ?vrLayers=0，强制走 3D Plane';
+  let layersUsable = layersEnabled && Boolean(session.renderState.layers);
+  let layerStatus = !tryNativeLayers
+    ? 'URL 指定 ?vrLayers=0，强制走 3D Plane'
+    : layersUsable
+      ? '等待创建 XRQuadLayer'
+      : '设备/浏览器未提供 WebXR Layers，已按 3D Plane 路径优化';
   let sourcePixels = { w: 0, h: 0 };
-  let lastLayerPaintMs = 0;
   let diagnosticsVersion = 0;
+  /** 平滑后的帧时长，用来看有没有掉帧（掉帧会触发重投影，整幅画面拖影） */
+  let frameMs = 0;
 
   const layerFeature = session.enabledFeatures?.includes('layers') ? 'enabled' : 'not requested/reported';
   const bumpDiagnostics = () => { diagnosticsVersion++; };
@@ -354,14 +401,19 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       : layersUsable
         ? 'XRQuadLayer ready/hidden'
         : '3D Plane FALLBACK';
-    const layerCount = session.renderState.layers?.length ?? 0;
+    const forPanel = Boolean(photoLayer && photoLayerInState);
+    const foot = footprintPx(photo.scale.x, forPanel);
+    const eyeDeg = measureEyePxPerRad() * Math.PI / 180;
+    // 采样比 = 纹理像素 / 实际需要的像素。>1 是缩小采样（摩尔纹来源），<1 是插值（发虚）
+    const ratio = foot > 0 && sourcePixels.w > 0
+      ? (sourcePixels.w / (foot * zoom)).toFixed(2)
+      : 'n/a';
     return [
       `VR显示路径: ${mode} | 原因: ${layerStatus}`,
-      `源图: ${sizeText(sourcePixels)} | QuadLayer: ${sizeText(photoLayerPixels)} | XR Base: ${baseLayerText()}`,
-      `features.layers: ${layerFeature} | XRWebGLBinding: ${typeof XRWebGLBinding !== 'undefined' ? 'yes' : 'no'} | renderState.layers: ${layerCount}`,
-      `renderScale: ${framebufferScale.toFixed(2)} | nativeScale: ${nativeScale.toFixed(2)} | 面板密度: ${(measurePanelPxPerRad() * Math.PI / 180).toFixed(1)} px/°`,
-      `银幕面板占位: ${footprintPx(photo.scale.x)}px | 已载入档位: ${loadedStep || 'n/a'} | zoom: ${zoom.toFixed(2)}x`,
-      `最近 layer 绘制: ${lastLayerPaintMs ? `${Math.round(performance.now() - lastLayerPaintMs)}ms前` : '未绘制'} | native layer test: ${tryNativeLayers ? 'ON' : 'OFF'}`,
+      `源图: ${sizeText(sourcePixels)} | 银幕占位: ${foot}px | 采样比: ${ratio}（1.0 最佳，>1 摩尔纹，<1 发虚）`,
+      `眼缓冲密度: ${eyeDeg.toFixed(1)} px/° | renderScale: ${framebufferScale.toFixed(2)} (原生 ${nativeScale.toFixed(2)}) | XR Base: ${baseLayerText()}`,
+      `帧时: ${frameMs.toFixed(1)}ms${frameMs > 14 ? ' ⚠掉帧→重投影拖影' : ''} | 档位: ${loadedStep || 'n/a'} | zoom: ${zoom.toFixed(2)}x | 银幕: ${screenScale.toFixed(2)}x`,
+      `features.layers: ${layerFeature} | QuadLayer: ${sizeText(photoLayerPixels)} | 可调: ?vrScreen= ?vrScale= ?vrLayers=0`,
     ];
   };
 
@@ -482,7 +534,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       // 开太小：直接糊。
       const pixelW = Math.max(
         512,
-        Math.min(maxTexSize, Math.round(footprintPx(w) * CFG.superSample))
+        Math.min(maxTexSize, Math.round(footprintPx(w, true) * CFG.superSample))
       );
       const pixelH = Math.max(1, Math.min(maxTexSize, Math.round(pixelW * (h / w))));
       const binding = renderer.xr.getBinding();
@@ -580,7 +632,6 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       // 我们绕过 three 直接动了 GL 状态，必须让 three 重新同步自己的缓存
       renderer.resetState();
       photoLayerDirty = false;
-      lastLayerPaintMs = performance.now();
       layerStatus = 'layer 已绘制当前照片';
       bumpDiagnostics();
       drawHud();
@@ -615,7 +666,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   // 缩放时每帧都重画 canvas 太费，内容没变就跳过
   let hudKey = '';
   const drawHud = (note?: string) => {
-    const key = `${index}|${Math.round(zoom * 100)}|${diagnosticsVersion}|${note ?? ''}`;
+    const key = `${index}|${Math.round(zoom * 100)}|${diagnosticsVersion}|${Math.round(frameMs)}|${note ?? ''}`;
     if (key === hudKey) return;
     hudKey = key;
     const w = hudCanvas.width;
@@ -657,21 +708,26 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const prepare = (tex: THREE.Texture) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = maxAniso;
-    // 纹理是按「银幕在面板上占多少像素」下载的，基本就是 1:1 采样。
-    // 这时开 mipmap 只会让 GPU 混进更小的一级（LOD>0），白丢一档细节；
-    // 抗锯齿已经由 Cloudinary 的 Lanczos 下采样在服务端做掉了。
-    tex.generateMipmaps = false;
-    tex.minFilter  = THREE.LinearFilter;
+    // mipmap 必须开着。纹理已经按实际采样率取，正常情况 LOD≈0、mipmap 不参与，
+    // 不损失细节；但视角一斜、头一动、或者刚好差一点点缩小采样时，
+    // 它就是唯一能挡住摩尔纹的东西。关掉 = 直接暴露原始采样噪声。
+    tex.generateMipmaps = true;
+    tex.minFilter  = THREE.LinearMipmapLinearFilter;
     tex.magFilter  = THREE.LinearFilter;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.needsUpdate = true;
     return tex;
   };
 
-  /** 当前缩放下，银幕需要多少像素的源图 */
+  /**
+   * 当前缩放下需要多少像素的源图。
+   *
+   * 按眼缓冲实测密度取（3D Plane 就是在这个密度上被采样的）。
+   * 走原生合成层时改按面板密度，因为那条路不经过眼缓冲。
+   */
   const wantedStep = (): number => {
-    const px = footprintPx(photo.scale.x) * zoom * CFG.superSample;
-    return sourceStep(Math.max(1024, Math.round(px)));
+    const forPanel = Boolean(photoLayer && photoLayerInState);
+    return quantize(footprintPx(photo.scale.x, forPanel) * zoom * CFG.superSample);
   };
 
   const adoptTexture = (tex: THREE.Texture, step: number) => {
@@ -684,9 +740,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     bumpDiagnostics();
 
     const aspect = img?.width && img?.height ? img.width / img.height : 3 / 2;
-    let w = CFG.photo.maxW;
+    let w = PHOTO_MAX_W;
     let h = w / aspect;
-    if (h > CFG.photo.maxH) { h = CFG.photo.maxH; w = h * aspect; }
+    if (h > PHOTO_MAX_H) { h = PHOTO_MAX_H; w = h * aspect; }
     photo.scale.set(w, h, 1);
 
     photoMat.map = tex;
@@ -751,7 +807,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   /** 合成层按当前占位应该开多大 */
   const wantedLayerPx = () =>
-    Math.max(512, Math.min(maxTexSize, Math.round(footprintPx(photo.scale.x) * CFG.superSample)));
+    Math.max(512, Math.min(maxTexSize, Math.round(footprintPx(photo.scale.x, true) * CFG.superSample)));
 
   /** 缩放到需要更多像素时，后台换一张更大的；换完保持当前的缩放和平移 */
   const refineSource = () => {
@@ -764,7 +820,10 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     }
     if (loadingStep) return;
     const want = wantedStep();
-    if (want > loadedStep) loadStep(want, false);
+    // 加迟滞：只有明显不够（20% 以上）才回源，否则摇杆一动就重下一张
+    if (want > loadedStep * CFG.refetchRatio || (!loadedStep && want > 0)) {
+      loadStep(want, false);
+    }
   };
 
   /** 以画面上的某点为锚点缩放：锚点下的像素保持不动 */
@@ -797,6 +856,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     eyeY:       1.6,
     thumbWidth: CFG.picker.thumbWidth,
     quality:    CFG.quality,
+    anisotropy: maxAniso,
   });
   picker.group.visible = false;
   scene.add(picker.group);
@@ -1010,16 +1070,30 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   };
 
   /* ---------- 主循环 ---------- */
+  let hudTick = 0;
+  // 第一张图要等第一帧：只有进了帧才量得到眼缓冲密度，
+  // 否则会先按兜底值下载一张尺寸不对的，然后要么发虚要么白下一次。
+  let firstShowDone = false;
   renderer.setAnimationLoop((_time, frame) => {
     if (!frame) return;
     const now = performance.now();
     const dt  = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
+    // 指数平滑，用来在 HUD 上看有没有掉帧
+    frameMs = frameMs ? frameMs + (dt * 1000 - frameMs) * 0.05 : dt * 1000;
+
+    if (!firstShowDone && measureEyePxPerRad() > 0) {
+      firstShowDone = true;
+      showPhoto(index);
+    }
+
     readInput(frame, now, dt);
     picker.update(dt);
     paintPhotoLayer(frame);
     // 缩放后按需换更大的源图，让银幕始终接近 1:1 采样
-    refineSource();
+    if (firstShowDone) refineSource();
+    // 每秒刷一次诊断（帧时、采样比会持续变化）
+    if (now - hudTick > 1000) { hudTick = now; drawHud(); }
     renderer.render(scene, camera);
   });
 
@@ -1060,7 +1134,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     onExit?.();
   });
 
-  showPhoto(index);
+  drawHud('载入中…');
 
   return {
     stop: () => {

@@ -25,6 +25,8 @@ export interface PickerOptions {
   /** 缩略图宽度与质量 */
   thumbWidth: number;
   quality:    number;
+  /** 各向异性过滤级别，斜着看的格子靠它保清晰 */
+  anisotropy: number;
 }
 
 /** 疏密档位：越靠前每张越大、同时看到的越少 */
@@ -75,7 +77,7 @@ export interface PickerHandle {
 }
 
 export function createPicker(opts: PickerOptions): PickerHandle {
-  const { photos, radius: R, arcDeg, eyeY, thumbWidth, quality } = opts;
+  const { photos, radius: R, arcDeg, eyeY, thumbWidth, quality, anisotropy } = opts;
   const total = photos.length;
   const group = new THREE.Group();
 
@@ -132,9 +134,12 @@ export function createPicker(opts: PickerOptions): PickerHandle {
         pending.delete(url);
         if (!cache.has(url)) {
           tex.colorSpace     = THREE.SRGBColorSpace;
-          tex.generateMipmaps = false;
-          tex.minFilter      = THREE.LinearFilter;
+          // 缩略图在幕布上大约占 250px，而图是 320px 宽 —— 属于缩小采样。
+          // 不开 mipmap 就会在细密纹理上出摩尔纹，这里必须开。
+          tex.generateMipmaps = true;
+          tex.minFilter      = THREE.LinearMipmapLinearFilter;
           tex.magFilter      = THREE.LinearFilter;
+          tex.anisotropy     = anisotropy;
           tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
           cache.set(url, tex);
           evictThumbs();
