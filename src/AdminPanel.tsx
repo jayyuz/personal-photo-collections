@@ -17,6 +17,7 @@ import {
   type ImageSize,
 } from './layout';
 import { packPhotos, useGridColumns } from './pack';
+import { compressImage, type Compressed } from './compress';
 
 /** 并发上限，避免一次把几十张图同时拉下来 */
 const PROBE_CONCURRENCY = 6;
@@ -32,7 +33,8 @@ const TINT_OPTS = [
   { label: '中性 · 灰调',  value: 'rgba(180,180,180,0.22)'  },
 ];
 const LS_CONFIG_KEY = 'photo-admin-config-v1';
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+/** 上传上限，超过的会先在浏览器里压缩 */
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_BATCH = 60;
 const LIB_PAGE = 60;
 const CLOUDINARY_URL_RE = /https?:\/\/res\.cloudinary\.com\/[^/\s]+\/(?:image|video)\/upload\/[^\s,;]+/gi;
@@ -70,6 +72,10 @@ interface PendingItem {
   exif?:      PhotoExif;
   /** 实测宽高，用来判定布局 */
   size?:      ImageSize;
+  /** 实际上传的字节数 */
+  bytes?:     number;
+  /** 压缩前的原始体积，只有压缩过的图才有 */
+  shrunkFrom?: number;
   /** 手动指定的布局；undefined 表示跟随自动判定 */
   span?:      PhotoSpan;
 }
@@ -109,13 +115,18 @@ function titleFromName(name: string): string {
   return name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ').trim() || 'untitled';
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function readFileAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+}
+
+function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
 }
 
 /** 容忍用户粘贴 res.cloudinary.com 链接或 cloudinary:// 连接串，只取云名称 */
@@ -457,16 +468,52 @@ export function AdminPanel({
         setStatus({ type: 'err', msg: `已跳过非图片文件：${file.name}` });
         continue;
       }
-      if (file.size > MAX_FILE_BYTES) {
-        setStatus({ type: 'err', msg: `${file.name} 超过 20 MB` });
-        continue;
-      }
       ok.push(file);
     }
     if (!ok.length) return;
-    const items: PendingItem[] = await Promise.all(ok.map(async file => {
-      const [dataUrl, exif, measured] = await Promise.all([
-        readFileAsDataUrl(file), readExif(file), sizeFromFile(file),
+
+    // 超限的不再直接拒掉，先压一压。压缩要开画布，并发压低一点免得爆内存
+    const oversized = ok.filter(f => f.size > MAX_FILE_BYTES);
+    const compressed = new Map<File, Compressed | undefined>();
+    if (oversized.length) {
+      setStatus({ type: 'ok', msg: `正在压缩 ${oversized.length} 张超过 10 MB 的图片…` });
+      const packs = await mapPool(oversized, 3, f => compressImage(f, MAX_FILE_BYTES));
+      oversized.forEach((f, i) => compressed.set(f, packs[i]));
+    }
+
+    const items = await Promise.all(ok.map(async (file): Promise<PendingItem | null> => {
+      // EXIF 要从原图读，压缩后元数据就没了
+      const exif = await readExif(file);
+
+      if (file.size > MAX_FILE_BYTES) {
+        const packed = compressed.get(file);
+        if (!packed) {
+          setStatus({ type: 'err', msg: `${file.name} 无法解码，已跳过` });
+          return null;
+        }
+        if (packed.blob.size > MAX_FILE_BYTES) {
+          setStatus({
+            type: 'err',
+            msg: `${file.name} 压缩后仍有 ${fmtBytes(packed.blob.size)}，超过 10 MB，已跳过`,
+          });
+          return null;
+        }
+        const dataUrl = await readFileAsDataUrl(packed.blob);
+        return {
+          localId:    newLocalId(),
+          title:      titleFromName(file.name),
+          preview:    dataUrl,
+          base64:     dataUrl,
+          remoteUrl:  null,
+          exif,
+          size:       { width: packed.width, height: packed.height },
+          bytes:      packed.blob.size,
+          shrunkFrom: file.size,
+        };
+      }
+
+      const [dataUrl, measured] = await Promise.all([
+        readFileAsDataUrl(file), sizeFromFile(file),
       ]);
       return {
         localId:   newLocalId(),
@@ -476,9 +523,23 @@ export function AdminPanel({
         remoteUrl: null,
         exif,
         size:      measured ?? sizeFromExif(exif),
+        bytes:     file.size,
       };
     }));
-    appendPending(items);
+
+    const ready  = items.filter((i): i is PendingItem => i !== null);
+    const shrunk = ready.filter(i => i.shrunkFrom).length;
+    const failed = ok.length - ready.length;
+    appendPending(ready);
+    // appendPending 会清空提示，所以压缩结果放在它后面再报
+    if (failed && !shrunk) {
+      setStatus({ type: 'err', msg: `${failed} 张压不到 10 MB 以内，已跳过` });
+    } else if (shrunk) {
+      setStatus({
+        type: 'ok',
+        msg: `${shrunk} 张已压缩到 10 MB 以内${failed ? `，${failed} 张压不动已跳过` : ''}。`,
+      });
+    }
   }, [appendPending]);
 
   const addUrlsFromText = useCallback((text: string) => {
@@ -924,7 +985,7 @@ export function AdminPanel({
                 <circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
               </svg>
               <span className="ap__drop-text">点击选择 或 拖拽图片</span>
-              <span className="ap__drop-hint">可多选 · JPG PNG WebP · ≤ 20 MB · 最多 {MAX_BATCH} 张</span>
+              <span className="ap__drop-hint">可多选 · JPG PNG WebP · 超过 10 MB 自动压缩 · 最多 {MAX_BATCH} 张</span>
             </div>
             <input
               ref={fileRef} type="file" multiple
@@ -1059,8 +1120,14 @@ export function AdminPanel({
                         />
                       </label>
                       <div className="ap__queue-foot">
-                        <span className="ap__queue-dim">
+                        <span
+                          className="ap__queue-dim"
+                          title={item.shrunkFrom
+                            ? `原图 ${fmtBytes(item.shrunkFrom)}，压缩后 ${fmtBytes(item.bytes ?? 0)}`
+                            : undefined}
+                        >
                           {item.size ? `${item.size.width}×${item.size.height}` : '尺寸未测出'}
+                          {item.shrunkFrom && ` · 已压缩 ${fmtBytes(item.bytes ?? 0)}`}
                         </span>
                         <select
                           className="ap__queue-span"
