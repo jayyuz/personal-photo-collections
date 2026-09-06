@@ -46,8 +46,8 @@ const CFG = {
   /** 画质相关 */
   // three 默认 foveation = 1（边缘低分辨率），银幕铺满视野时正好糊在边缘上，关掉
   foveation:   0,
-  // 渲染分辨率倍率：照片是静态内容，适当提高倍率比默认 WebXR framebuffer 更接近 Pico 浏览器直看效果
-  renderScale: 1.7,
+  // 渲染分辨率倍率：过高会让 Pico 进 VR 慢或不稳定，默认取保守值。
+  renderScale: 1.5,
   // 站点上的图是 w_1600，放在 VR 大银幕上像素不够；主图按最长边加载。
   photoSize:   4096,
   // q_auto 在大屏上压得太狠，明确给高质量
@@ -116,8 +116,12 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const { photos, onIndex, onExit, onError } = opts;
   if (!photos.length) throw new Error('没有可播放的照片');
 
+  const tryNativeLayers = new URLSearchParams(window.location.search).get('vrLayers') === '1';
+  const optionalFeatures = ['local-floor', 'bounded-floor', 'hand-tracking'];
+  if (tryNativeLayers) optionalFeatures.push('layers');
+
   const session = await navigator.xr!.requestSession('immersive-vr', {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+    optionalFeatures,
   });
 
   const scene = new THREE.Scene();
@@ -271,13 +275,15 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let photoLayerImage: TexImageSource | null = null;
   let photoLayerDirty = false;
   let layerPainter: PhotoLayerPainter | null = null;
-  let layersUsable = Boolean(session.renderState.layers && typeof XRWebGLBinding !== 'undefined');
-  let layerStatus = layersUsable ? '等待创建 XRQuadLayer' : '浏览器未启用 WebXR Layers，使用 3D Plane 回退';
+  let layersUsable = Boolean(tryNativeLayers && session.renderState.layers && typeof XRWebGLBinding !== 'undefined');
+  let layerStatus = tryNativeLayers
+    ? (layersUsable ? '等待创建 XRQuadLayer' : '浏览器未启用 WebXR Layers，使用 3D Plane 回退')
+    : '默认关闭原生 XRQuadLayer；URL 加 ?vrLayers=1 才测试';
   let sourcePixels = { w: 0, h: 0 };
   let lastLayerPaintMs = 0;
   let diagnosticsVersion = 0;
 
-  const layerFeature = session.enabledFeatures?.includes('layers') ? 'enabled' : 'not reported';
+  const layerFeature = session.enabledFeatures?.includes('layers') ? 'enabled' : 'not requested/reported';
   const bumpDiagnostics = () => { diagnosticsVersion++; };
 
   const sizeText = (s: { w: number; h: number }) => s.w > 0 && s.h > 0 ? `${s.w}x${s.h}` : 'n/a';
@@ -306,7 +312,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       `源图: ${sizeText(sourcePixels)} | QuadLayer: ${sizeText(photoLayerPixels)} | XR Base: ${baseLayerText()}`,
       `features.layers: ${layerFeature} | XRWebGLBinding: ${typeof XRWebGLBinding !== 'undefined' ? 'yes' : 'no'} | renderState.layers: ${layerCount}`,
       `renderScale: ${framebufferScale.toFixed(2)} | nativeScale: ${nativeScale.toFixed(2)} | maxTextureSize: ${maxTexSize}`,
-      `最近 layer 绘制: ${lastLayerPaintMs ? `${Math.round(performance.now() - lastLayerPaintMs)}ms前` : '未绘制'}`,
+      `最近 layer 绘制: ${lastLayerPaintMs ? `${Math.round(performance.now() - lastLayerPaintMs)}ms前` : '未绘制'} | native layer test: ${tryNativeLayers ? 'ON' : 'OFF'}`,
     ];
   };
 
