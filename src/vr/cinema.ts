@@ -14,7 +14,7 @@
  */
 import * as THREE from 'three';
 import { createPicker, type PickerHandle } from './picker';
-import { cloudinaryVariant } from './source';
+import { cloudinaryMaxVariant } from './source';
 
 export interface VrPhoto {
   src: string;
@@ -47,13 +47,13 @@ const CFG = {
   foveation:   0,
   // 渲染分辨率倍率：不低于这个值，并尽量贴近头显原生分辨率（上限 2 防止过热掉帧）
   renderScale: 1.2,
-  // 站点上的图是 w_1600，放在 VR 大银幕上像素不够，换更大的
-  photoWidth:  2560,
+  // 站点上的图是 w_1600，放在 VR 大银幕上像素不够；主图按最长边加载。
+  photoSize:   4096,
   // q_auto 在大屏上压得太狠，明确给高质量
   quality:     90,
   // 放大超过这个倍数就后台换一张更高分辨率的，不然 6× 时只剩几百像素宽
   hiResFrom:   1.8,
-  photoHiWidth: 4096,
+  photoHiSize: 6144,
   /** 悬浮照片墙 */
   picker: {
     radius:     2.8,   // 幕布离观众的距离
@@ -82,9 +82,6 @@ function nativeScaleOf(session: XRSession): number {
     return 1;
   }
 }
-
-/** 把站点用的 w_1600 + q_auto 换成 VR 需要的高分辨率、高质量版本 */
-const vrSource = (src: string, width: number) => cloudinaryVariant(src, width, CFG.quality);
 
 export async function isVrAvailable(): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.xr) return false;
@@ -151,6 +148,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   }
 
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  const maxTexSize = renderer.capabilities.maxTextureSize || CFG.photoSize;
+  const vrSource = (src: string, size: number) =>
+    cloudinaryMaxVariant(src, Math.min(size, maxTexSize), CFG.quality);
 
   /* ---------- 放映厅 ---------- */
   const room = new THREE.Mesh(
@@ -301,7 +301,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const prepare = (tex: THREE.Texture) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = maxAniso;
-    tex.minFilter  = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = false;
+    tex.minFilter  = THREE.LinearFilter;
     tex.magFilter  = THREE.LinearFilter;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     return tex;
@@ -313,9 +314,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     hiResDone = false;
     const my = ++token;
     drawHud('载入中…');
-    // VR 里用高分辨率版本，站点那张 w_1600 在银幕上不够清晰
+    // VR 里用最长边高分辨率版本，站点那张 w_1600 在银幕上不够清晰
     loader.load(
-      vrSource(photos[index].src, CFG.photoWidth),
+      vrSource(photos[index].src, CFG.photoSize),
       tex => {
         if (disposed || my !== token) { tex.dispose(); return; }
         texture?.dispose();
@@ -349,7 +350,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const loadHiRes = () => {
     const my = token;
     loader.load(
-      vrSource(photos[index].src, CFG.photoHiWidth),
+      vrSource(photos[index].src, CFG.photoHiSize),
       tex => {
         if (disposed || my !== token) { tex.dispose(); return; }
         const cur = texture?.image as { width?: number } | undefined;
