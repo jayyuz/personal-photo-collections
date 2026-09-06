@@ -14,7 +14,7 @@
  */
 import * as THREE from 'three';
 import { createPicker, type PickerHandle } from './picker';
-import { cloudinaryMaxVariant } from './source';
+import { cloudinaryFit, MAX_CLOUDINARY_SIDE } from './source';
 
 export interface VrPhoto {
   src: string;
@@ -43,18 +43,25 @@ const CFG = {
   zoomSpeed: 1.5,
   hud:       { w: 7.2, y: 0.15, z: -9.4, tilt: -0.12 },
   exitHoldMs: 900,
-  /** 画质相关 */
+
+  /* ---------- 画质 ---------- */
   // three 默认 foveation = 1（边缘低分辨率），银幕铺满视野时正好糊在边缘上，关掉
   foveation:   0,
-  // 渲染分辨率倍率：过高会让 Pico 进 VR 慢或不稳定，默认取保守值。
-  renderScale: 1.5,
-  // 站点上的图是 w_1600，放在 VR 大银幕上像素不够；主图按最长边加载。
-  photoSize:   4096,
+  // 拿不到头显原生倍率时的兜底值。正常情况直接用 nativeScale：
+  // 超过原生只是白烧 GPU，一旦掉帧，合成器的重投影会把画面拖得更糊。
+  renderScale: 1.4,
+  // 眼缓冲是一张覆盖 ~105° 的透视贴图，中心角分辨率低于面板本身；
+  // 原生合成层是直接按面板采样的，用这个系数把眼缓冲密度折算成面板密度。
+  panelBoost:  1.5,
+  // 纹理 / 合成层再多给一点余量，抵消合成器的双线性采样
+  superSample: 1.15,
+  // 只在这些档位向 Cloudinary 要图，避免缩放过程中反复回源
+  sourceSteps: [1024, 1408, 1792, 2304, 3072, 4096, MAX_CLOUDINARY_SIDE],
   // q_auto 在大屏上压得太狠，明确给高质量
-  quality:     90,
-  // 放大超过这个倍数就后台换一张更高分辨率的，不然 6× 时只剩几百像素宽
-  hiResFrom:   1.8,
-  photoHiSize: 6144,
+  quality:     88,
+  // 下采样到目标尺寸后补一点锐度，抵消缩放与合成器采样的损失
+  sharpen:     60,
+
   /** 悬浮照片墙 */
   picker: {
     radius:     2.8,   // 幕布离观众的距离
@@ -116,7 +123,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const { photos, onIndex, onExit, onError } = opts;
   if (!photos.length) throw new Error('没有可播放的照片');
 
-  const tryNativeLayers = new URLSearchParams(window.location.search).get('vrLayers') === '1';
+  const tryNativeLayers = new URLSearchParams(window.location.search).get('vrLayers') !== '0';
   const optionalFeatures = ['local-floor', 'bounded-floor', 'hand-tracking'];
   if (tryNativeLayers) optionalFeatures.push('layers');
 
@@ -139,8 +146,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   // 关掉固定注视点渲染，整块银幕都按全分辨率画
   renderer.xr.setFoveation(CFG.foveation);
   const nativeScale = nativeScaleOf(session);
-  const framebufferScale = Math.min(2, Math.max(CFG.renderScale, nativeScale));
-  // 渲染分辨率取「不低于 renderScale」和「头显原生」里的较大者
+  // 就按头显原生分辨率渲染。再往上加不会更清晰，只会掉帧，
+  // 而掉帧后合成器的重投影（ATW）会把整幅画面拖出拖影，反而更糊。
+  const framebufferScale = Math.min(2, nativeScale > 1 ? nativeScale : CFG.renderScale);
   renderer.xr.setFramebufferScaleFactor(framebufferScale);
 
   // local-floor 拿不到就退回 local，至少能进得去
@@ -153,28 +161,36 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   }
 
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
-  const maxTexSize = renderer.capabilities.maxTextureSize || CFG.photoSize;
+  const maxTexSize = renderer.capabilities.maxTextureSize || 4096;
+  const maxSourceSide = Math.min(maxTexSize, MAX_CLOUDINARY_SIDE);
+  /** 把「想要多少像素」吸附到固定档位，避免缩放时一点点地反复回源 */
+  const sourceStep = (want: number): number => {
+    const steps = CFG.sourceSteps.filter(s => s <= maxSourceSide);
+    return steps.find(s => s >= want) ?? steps[steps.length - 1] ?? maxSourceSide;
+  };
   const vrSource = (src: string, size: number) =>
-    cloudinaryMaxVariant(src, Math.min(size, maxTexSize), CFG.quality);
+    cloudinaryFit(src, Math.min(size, maxSourceSide), CFG.quality, CFG.sharpen);
 
   /* ---------- 放映厅 ---------- */
+  // 放映厅几乎铺满整个视野，用 PBR（MeshStandardMaterial）画等于按原生分辨率
+  // 跑一遍全屏 PBR，Pico 这一档 GPU 很容易掉帧；Lambert 便宜得多，观感差别极小。
   const room = new THREE.Mesh(
     new THREE.BoxGeometry(CFG.room.w, CFG.room.h, CFG.room.d),
-    new THREE.MeshStandardMaterial({ color: 0x121216, roughness: 1, metalness: 0, side: THREE.BackSide })
+    new THREE.MeshLambertMaterial({ color: 0x121216, side: THREE.BackSide })
   );
   room.position.set(0, CFG.room.h / 2, -CFG.room.d / 2 + 8);
   scene.add(room);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(CFG.room.w, CFG.room.d),
-    new THREE.MeshStandardMaterial({ color: 0x141210, roughness: 0.95, metalness: 0 })
+    new THREE.MeshLambertMaterial({ color: 0x141210 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0.001, -CFG.room.d / 2 + 8);
   scene.add(floor);
 
   // 座椅只做空间参照，不需要精准
-  const seatMat  = new THREE.MeshStandardMaterial({ color: 0x1b1b1e, roughness: 0.9 });
+  const seatMat  = new THREE.MeshLambertMaterial({ color: 0x1b1b1e });
   const seatGeom = new THREE.BoxGeometry(0.55, 0.9, 0.6);
   for (let row = 0; row < 3; row++) {
     for (let col = -4; col <= 4; col++) {
@@ -256,6 +272,37 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let texture: THREE.Texture | null = null;
   let disposed = false;
 
+  /**
+   * 头显面板的角分辨率（像素 / 弧度）。
+   *
+   * 这是整件事的核心：头显每度视野只有固定的物理像素（Pico 4 约 20 px/°），
+   * 银幕张开 48° 就只有 ~1000 px 可用 —— 再大的纹理也变不出像素来。
+   * 所有纹理 / 合成层尺寸都按这个值推，多要的部分纯属浪费带宽还会引入采样损失。
+   *
+   * 投影矩阵 + 视口给出的是「眼缓冲」的中心密度，乘 panelBoost 折算到面板。
+   */
+  let panelPxPerRad = 0;
+  const measurePanelPxPerRad = (): number => {
+    if (panelPxPerRad) return panelPxPerRad;
+    const eye = renderer.xr.getCamera().cameras[0] as
+      | (THREE.PerspectiveCamera & { viewport?: THREE.Vector4 })
+      | undefined;
+    const vpW = eye?.viewport?.z ?? 0;
+    // p[0] = 2n/(r-l)，中心处 d(NDC)/d(角度)；再乘半个视口宽换成像素
+    const p0 = eye?.projectionMatrix.elements[0] ?? 0;
+    if (!(vpW > 0) || !(p0 > 0)) return 0;
+    panelPxPerRad = (p0 * vpW / 2) * CFG.panelBoost;
+    return panelPxPerRad;
+  };
+
+  /** 宽 w 米、摆在银幕位置上的画面，在面板上大约横跨多少像素 */
+  const footprintPx = (w: number): number => {
+    const pxPerRad = measurePanelPxPerRad();
+    const rad = 2 * Math.atan(w / 2 / Math.abs(CFG.screen.z));
+    // 还没进第一帧、量不到时给个保守值，第一帧后会自动修正
+    return pxPerRad > 0 ? Math.round(rad * pxPerRad) : 1408;
+  };
+
   type PhotoLayerPainter = {
     fb: WebGLFramebuffer;
     tex: WebGLTexture;
@@ -273,12 +320,13 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let photoLayerInState = false;
   let photoLayerPixels = { w: 0, h: 0 };
   let photoLayerImage: TexImageSource | null = null;
+  let photoLayerImageDirty = false;
   let photoLayerDirty = false;
   let layerPainter: PhotoLayerPainter | null = null;
   let layersUsable = Boolean(tryNativeLayers && session.renderState.layers && typeof XRWebGLBinding !== 'undefined');
   let layerStatus = tryNativeLayers
     ? (layersUsable ? '等待创建 XRQuadLayer' : '浏览器未启用 WebXR Layers，使用 3D Plane 回退')
-    : '默认关闭原生 XRQuadLayer；URL 加 ?vrLayers=1 才测试';
+    : 'URL 指定 ?vrLayers=0，强制走 3D Plane';
   let sourcePixels = { w: 0, h: 0 };
   let lastLayerPaintMs = 0;
   let diagnosticsVersion = 0;
@@ -311,7 +359,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       `VR显示路径: ${mode} | 原因: ${layerStatus}`,
       `源图: ${sizeText(sourcePixels)} | QuadLayer: ${sizeText(photoLayerPixels)} | XR Base: ${baseLayerText()}`,
       `features.layers: ${layerFeature} | XRWebGLBinding: ${typeof XRWebGLBinding !== 'undefined' ? 'yes' : 'no'} | renderState.layers: ${layerCount}`,
-      `renderScale: ${framebufferScale.toFixed(2)} | nativeScale: ${nativeScale.toFixed(2)} | maxTextureSize: ${maxTexSize}`,
+      `renderScale: ${framebufferScale.toFixed(2)} | nativeScale: ${nativeScale.toFixed(2)} | 面板密度: ${(measurePanelPxPerRad() * Math.PI / 180).toFixed(1)} px/°`,
+      `银幕面板占位: ${footprintPx(photo.scale.x)}px | 已载入档位: ${loadedStep || 'n/a'} | zoom: ${zoom.toFixed(2)}x`,
       `最近 layer 绘制: ${lastLayerPaintMs ? `${Math.round(performance.now() - lastLayerPaintMs)}ms前` : '未绘制'} | native layer test: ${tryNativeLayers ? 'ON' : 'OFF'}`,
     ];
   };
@@ -332,19 +381,20 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const ensureLayerPainter = (): PhotoLayerPainter => {
     if (layerPainter) return layerPainter;
     const vs = compile(gl.VERTEX_SHADER, `
+      precision highp float;
       attribute vec2 aPos;
       attribute vec2 aUv;
-      varying vec2 vUv;
+      varying highp vec2 vUv;
       void main() {
         vUv = aUv;
         gl_Position = vec4(aPos, 0.0, 1.0);
       }
     `);
     const fs = compile(gl.FRAGMENT_SHADER, `
-      precision mediump float;
+      precision highp float;
       varying vec2 vUv;
       uniform sampler2D uTex;
-      uniform vec4 uUv;
+      uniform highp vec4 uUv;
       void main() {
         gl_FragColor = texture2D(uTex, uUv.xy + vUv * uUv.zw);
       }
@@ -392,21 +442,20 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const setPhotoLayerInRenderState = (visible: boolean) => {
     if (!photoLayer || !session.renderState.layers || photoLayerInState === visible) return;
     const layers = session.renderState.layers.filter(layer => layer !== photoLayer);
-    void session.updateRenderState({ layers: visible ? [photoLayer, ...layers] : layers }).catch(e => {
+    // renderState.layers 是「由后往前」的顺序：数组末尾才是最上层。
+    // 放在开头会被 three 的 projection layer（不透明背景）整块盖掉。
+    void session.updateRenderState({ layers: visible ? [...layers, photoLayer] : layers }).catch(e => {
       layersUsable = false;
       photoLayerInState = false;
       layerStatus = `updateRenderState 失败: ${errorText(e)}`;
-      photoMat.opacity = 1;
-      photoMat.transparent = false;
-      photoMat.needsUpdate = true;
+      photo.visible = true;
       bumpDiagnostics();
       drawHud();
     });
     photoLayerInState = visible;
     layerStatus = visible ? 'layer 已加入 renderState.layers' : '照片墙打开，主图 layer 暂时隐藏';
-    photoMat.opacity = visible ? 0 : 1;
-    photoMat.transparent = visible;
-    photoMat.needsUpdate = true;
+    // 合成层生效时就别再画 3D 平面了：既省填充率，也避免两者半透明叠加互相污染
+    photo.visible = !visible;
     photoLayerDirty = visible || photoLayerDirty;
     bumpDiagnostics();
   };
@@ -428,9 +477,14 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       return;
     }
     try {
-      const img = image as { width?: number; height?: number };
-      const pixelW = Math.max(1, Math.min(maxTexSize, Math.round(img.width || 2048)));
-      const pixelH = Math.max(1, Math.min(maxTexSize, Math.round(img.height || 2048)));
+      // 合成层的分辨率要贴着「面板上实际占多少像素」，不能照源图尺寸开。
+      // 开太大：合成层没有 mipmap，缩小采样会闪；还会白占显存、每次重传更慢。
+      // 开太小：直接糊。
+      const pixelW = Math.max(
+        512,
+        Math.min(maxTexSize, Math.round(footprintPx(w) * CFG.superSample))
+      );
+      const pixelH = Math.max(1, Math.min(maxTexSize, Math.round(pixelW * (h / w))));
       const binding = renderer.xr.getBinding();
       if (!binding?.createQuadLayer) {
         layerStatus = 'XRWebGLBinding 不支持 createQuadLayer，暂用 3D Plane';
@@ -445,27 +499,28 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
             { x: 0, y: CFG.screen.y, z: CFG.screen.z },
             { x: 0, y: 0, z: 0, w: 1 }
           ),
-          width: w,
-          height: h,
+          width: w / 2,
+          height: h / 2,
           viewPixelWidth: pixelW,
           viewPixelHeight: pixelH,
           layout: 'mono',
           isStatic: false,
         });
-        photoLayer.quality = 'graphics-optimized';
         photoLayer.chromaticAberrationCorrection = true;
         photoLayer.blendTextureSourceAlpha = false;
         photoLayerPixels = { w: pixelW, h: pixelH };
         layerStatus = '已创建原生 XRQuadLayer';
       } else {
-        photoLayer.width = w;
-        photoLayer.height = h;
+        // XRQuadLayer 的 width/height 是「半宽 / 半高」
+        photoLayer.width = w / 2;
+        photoLayer.height = h / 2;
         photoLayer.transform = new XRRigidTransform(
           { x: 0, y: CFG.screen.y, z: CFG.screen.z },
           { x: 0, y: 0, z: 0, w: 1 }
         );
       }
       photoLayerImage = image;
+      photoLayerImageDirty = true;
       photoLayerDirty = true;
       setPhotoLayerInRenderState(true);
       bumpDiagnostics();
@@ -485,13 +540,19 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       const sub = binding.getSubImage(photoLayer, frame);
       const p = ensureLayerPainter();
 
-      gl.bindTexture(gl.TEXTURE_2D, p.tex);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, photoLayerImage);
+      // 源图只在换图时上传一次。之前每帧重传，4096² RGBA 一次 64MB，
+      // 缩放 / 拖动时必然掉帧，重投影一介入画面就更糊了。
+      if (photoLayerImageDirty) {
+        gl.bindTexture(gl.TEXTURE_2D, p.tex);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, photoLayerImage);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        photoLayerImageDirty = false;
+      }
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, p.fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sub.colorTexture, 0);
@@ -499,6 +560,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.CULL_FACE);
       gl.disable(gl.BLEND);
+      gl.disable(gl.SCISSOR_TEST);
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -515,7 +577,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       gl.uniform4f(p.uUv, offX, offY, 1 / zoom, 1 / zoom);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      renderer.state.reset();
+      // 我们绕过 three 直接动了 GL 状态，必须让 three 重新同步自己的缓存
+      renderer.resetState();
       photoLayerDirty = false;
       lastLayerPaintMs = performance.now();
       layerStatus = 'layer 已绘制当前照片';
@@ -586,93 +649,122 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   // 切图自增，异步回调靠它判断自己是不是过期了
   let token = 0;
-  let hiResDone = false;
+  /** 当前纹理是按哪个档位下载的；0 = 还没有 */
+  let loadedStep = 0;
+  /** 正在下载的档位；0 = 空闲 */
+  let loadingStep = 0;
 
   const prepare = (tex: THREE.Texture) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = maxAniso;
-    // 主图纹理大多处于缩小采样；不用 mipmap 会更“硬”，但细线和纹理会产生摩尔纹。
-    tex.generateMipmaps = true;
-    tex.minFilter  = THREE.LinearMipmapLinearFilter;
+    // 纹理是按「银幕在面板上占多少像素」下载的，基本就是 1:1 采样。
+    // 这时开 mipmap 只会让 GPU 混进更小的一级（LOD>0），白丢一档细节；
+    // 抗锯齿已经由 Cloudinary 的 Lanczos 下采样在服务端做掉了。
+    tex.generateMipmaps = false;
+    tex.minFilter  = THREE.LinearFilter;
     tex.magFilter  = THREE.LinearFilter;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
     return tex;
+  };
+
+  /** 当前缩放下，银幕需要多少像素的源图 */
+  const wantedStep = (): number => {
+    const px = footprintPx(photo.scale.x) * zoom * CFG.superSample;
+    return sourceStep(Math.max(1024, Math.round(px)));
+  };
+
+  const adoptTexture = (tex: THREE.Texture, step: number) => {
+    texture?.dispose();
+    texture = prepare(tex);
+    loadedStep = Math.max(loadedStep, step);
+
+    const img = tex.image as { width?: number; height?: number };
+    sourcePixels = { w: Math.round(img.width || 0), h: Math.round(img.height || 0) };
+    bumpDiagnostics();
+
+    const aspect = img?.width && img?.height ? img.width / img.height : 3 / 2;
+    let w = CFG.photo.maxW;
+    let h = w / aspect;
+    if (h > CFG.photo.maxH) { h = CFG.photo.maxH; w = h * aspect; }
+    photo.scale.set(w, h, 1);
+
+    photoMat.map = tex;
+    photoMat.color.set(picker.isOpen() ? 0x2b2b2b : 0xffffff);
+    photoMat.needsUpdate = true;
+    syncPhotoLayer(tex.image as TexImageSource, w, h);
+    photo.visible = !(photoLayer && photoLayerInState);
+    apply();
+  };
+
+  /**
+   * 按档位取图。
+   * isSwitch = true 表示这是换照片（必须换上），否则只是缩放后要更高分辨率。
+   */
+  const loadStep = (step: number, isSwitch: boolean) => {
+    const my = token;
+    loadingStep = step;
+    loader.load(
+      vrSource(photos[index].src, step),
+      tex => {
+        loadingStep = 0;
+        if (disposed || my !== token) { tex.dispose(); return; }
+        const cur = texture?.image as { width?: number } | undefined;
+        const next = tex.image as { width?: number };
+        // Cloudinary 不会把图放大到超过原图；换来的不比现在这张大就别换，
+        // 同时把 loadedStep 抬上去，免得每帧都重复请求同一张。
+        if (!isSwitch && cur?.width && next?.width && next.width <= cur.width) {
+          loadedStep = Math.max(loadedStep, step);
+          bumpDiagnostics();
+          tex.dispose();
+          return;
+        }
+        adoptTexture(tex, step);
+        drawHud();
+        if (isSwitch) {
+          picker.setPlaying(index);
+          onIndex?.(index);
+        }
+      },
+      undefined,
+      () => {
+        loadingStep = 0;
+        // 失败的档位也记下来，否则主循环会每帧重试
+        loadedStep = Math.max(loadedStep, step);
+        if (disposed || my !== token) return;
+        if (isSwitch) {
+          drawHud('这张图载入失败，摇杆左右换一张');
+          onError?.(`VR 里载入失败：${photos[index].title}`);
+        }
+      }
+    );
   };
 
   const showPhoto = (i: number) => {
     index = (i + photos.length) % photos.length;
     zoom = 1; offX = 0; offY = 0;
-    hiResDone = false;
-    const my = ++token;
+    loadedStep = 0;
+    token++;
     drawHud('载入中…');
-    // VR 里用最长边高分辨率版本，站点那张 w_1600 在银幕上不够清晰
-    loader.load(
-      vrSource(photos[index].src, CFG.photoSize),
-      tex => {
-        if (disposed || my !== token) { tex.dispose(); return; }
-        texture?.dispose();
-        texture = prepare(tex);
-
-        const img = tex.image as { width?: number; height?: number };
-        sourcePixels = {
-          w: Math.round(img.width || 0),
-          h: Math.round(img.height || 0),
-        };
-        bumpDiagnostics();
-        const aspect = img?.width && img?.height ? img.width / img.height : 3 / 2;
-        let w = CFG.photo.maxW;
-        let h = w / aspect;
-        if (h > CFG.photo.maxH) { h = CFG.photo.maxH; w = h * aspect; }
-        photo.scale.set(w, h, 1);
-        syncPhotoLayer(tex.image as TexImageSource, w, h);
-
-        photoMat.map = tex;
-        photoMat.color.set(0xffffff);
-        photoMat.opacity = photoLayer && photoLayerInState ? 0 : 1;
-        photoMat.transparent = Boolean(photoLayer && photoLayerInState);
-        photoMat.needsUpdate = true;
-        apply();
-        drawHud();
-        picker.setPlaying(index);
-        onIndex?.(index);
-      },
-      undefined,
-      () => {
-        if (disposed || my !== token) return;
-        drawHud('这张图载入失败，摇杆左右换一张');
-        onError?.(`VR 里载入失败：${photos[index].title}`);
-      }
-    );
+    loadStep(wantedStep(), true);
   };
 
-  /** 放大到一定程度后，后台换一张原尺寸的图；换完保持当前的缩放和平移 */
-  const loadHiRes = () => {
-    const my = token;
-    loader.load(
-      vrSource(photos[index].src, CFG.photoHiSize),
-      tex => {
-        if (disposed || my !== token) { tex.dispose(); return; }
-        const cur = texture?.image as { width?: number } | undefined;
-        const next = tex.image as { width?: number };
-        // 原图还不如当前这张大（Cloudinary 不会放大超过原图），就没必要换
-        if (cur?.width && next?.width && next.width <= cur.width) { tex.dispose(); return; }
-        texture?.dispose();
-        texture = prepare(tex);
-        sourcePixels = {
-          w: Math.round((tex.image as { width?: number }).width || 0),
-          h: Math.round((tex.image as { height?: number }).height || 0),
-        };
-        bumpDiagnostics();
-        photoMat.map = tex;
-        photoMat.opacity = photoLayer && photoLayerInState ? 0 : 1;
-        photoMat.transparent = Boolean(photoLayer && photoLayerInState);
-        photoMat.needsUpdate = true;
-        syncPhotoLayer(tex.image as TexImageSource, photo.scale.x, photo.scale.y);
-        apply();
-      },
-      undefined,
-      () => { /* 高清版没拿到就继续用当前这张 */ }
-    );
+  /** 合成层按当前占位应该开多大 */
+  const wantedLayerPx = () =>
+    Math.max(512, Math.min(maxTexSize, Math.round(footprintPx(photo.scale.x) * CFG.superSample)));
+
+  /** 缩放到需要更多像素时，后台换一张更大的；换完保持当前的缩放和平移 */
+  const refineSource = () => {
+    // 面板密度要到第一帧才量得到，量到之后按真实占位把合成层重开一次
+    if (
+      photoLayer && photoLayerImage && layersUsable && !picker.isOpen() &&
+      photoLayerPixels.w !== wantedLayerPx()
+    ) {
+      syncPhotoLayer(photoLayerImage, photo.scale.x, photo.scale.y);
+    }
+    if (loadingStep) return;
+    const want = wantedStep();
+    if (want > loadedStep) loadStep(want, false);
   };
 
   /** 以画面上的某点为锚点缩放：锚点下的像素保持不动 */
@@ -734,6 +826,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     // 照片墙打开时压暗银幕，免得和缩略图抢注意力
     photoMat.color.set(next ? 0x2b2b2b : texture ? 0xffffff : 0x111111);
     setPhotoLayerInRenderState(!next);
+    photo.visible = !(photoLayer && photoLayerInState);
     hud.visible = !next;
     drawHud();
   };
@@ -925,11 +1018,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     readInput(frame, now, dt);
     picker.update(dt);
     paintPhotoLayer(frame);
-    // 放大到一定程度就换更高分辨率的图，保证放大后还看得清细节
-    if (!hiResDone && zoom > CFG.hiResFrom) {
-      hiResDone = true;
-      loadHiRes();
-    }
+    // 缩放后按需换更大的源图，让银幕始终接近 1:1 采样
+    refineSource();
     renderer.render(scene, camera);
   });
 
