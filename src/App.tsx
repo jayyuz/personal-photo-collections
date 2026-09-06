@@ -225,6 +225,8 @@ export default function App() {
 
       <Lightbox
         photo={lightboxPhoto}
+        photos={gallery}
+        onSelect={(i) => { const p = gallery[i]; if (p) setLightboxPhoto(p); }}
         onClose={closeLightbox}
         onPrev={prevPhoto}
         onNext={nextPhoto}

@@ -121,7 +121,8 @@ a       { color: inherit; text-decoration: none; }
 .lb__backdrop-veil { position: absolute; inset: 0; background:
   radial-gradient(120% 80% at 50% 45%, rgba(6,6,6,0.28) 0%, rgba(6,6,6,0.72) 62%, rgba(6,6,6,0.92) 100%),
   linear-gradient(to top, rgba(6,6,6,0.8) 0%, transparent 45%); }
-.lb__view { position: relative; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; padding: 32px; }
+/* 手势（捏合缩放、滑动翻页）全自己做，浏览器默认手势要关掉 */
+.lb__view { position: relative; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; padding: 32px; touch-action: none; }
 .lb__panel { position: absolute; z-index: 4; top: 68px; right: 20px; width: 330px; max-width: calc(100% - 40px); max-height: calc(100% - 88px); border-radius: 14px; border: 1px solid rgba(255,255,255,0.1); background: rgba(14,14,14,0.5); box-shadow: 0 24px 60px rgba(0,0,0,0.5); backdrop-filter: blur(30px) saturate(1.3); -webkit-backdrop-filter: blur(30px) saturate(1.3); display: flex; flex-direction: column; min-height: 0; overflow: hidden; animation: lbPanelIn 0.26s var(--ease-out); }
 @keyframes lbPanelIn { from { opacity: 0; transform: translate(12px, -6px) scale(0.98); } to { opacity: 1; transform: none; } }
 .lb__panel-head { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid rgba(255,255,255,0.07); }
@@ -140,6 +141,11 @@ a       { color: inherit; text-decoration: none; }
 .lb__info-btn { position: absolute; top: 20px; right: 68px; z-index: 2; color: rgba(240,240,240,0.6); padding: 10px; border-radius: 50%; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: color 0.15s, background 0.2s; }
 .lb__info-btn:hover { color: #FFF; background: rgba(255,255,255,0.14); }
 @keyframes lbIn { from { opacity: 0; } to { opacity: 1; } }
+.lb__vr { position: absolute; top: 20px; right: 116px; z-index: 2; color: rgba(240,240,240,0.6); padding: 10px; border-radius: 50%; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: color 0.15s, background 0.2s; }
+.lb__vr:hover:not(:disabled) { color: #FFF; background: rgba(255,255,255,0.14); }
+.lb__vr:disabled { opacity: 0.5; cursor: progress; }
+.lb__vr:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
+.lb__vr-note { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 40px); padding: 9px 16px; border-radius: 10px; font-size: 0.75rem; letter-spacing: 0.04em; color: rgba(240,240,240,0.85); background: rgba(10,10,10,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.09); animation: lbFade 0.2s var(--ease-out); }
 .lb__close { position: absolute; top: 20px; right: 20px; z-index: 2; color: rgba(240,240,240,0.6); padding: 10px; transition: color 0.15s, transform 0.2s, background 0.2s; border-radius: 50%; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .lb__close:hover { color: #FFF; transform: rotate(90deg) scale(1.1); background: rgba(255,255,255,0.14); }
 .lb__close:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
@@ -153,8 +159,9 @@ a       { color: inherit; text-decoration: none; }
   0 40px 90px rgba(0,0,0,0.5); }
 .lb__img--on { opacity: 1; }
 /* 放大是为了看细节，这时候撤掉卡纸和圆角，免得跟着放大后抢视线 */
-.lb__img--zoomed { cursor: grab; touch-action: none; border-radius: 0; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
-.lb__img--drag { cursor: grabbing; transition: opacity 0.5s var(--ease-out); }
+.lb__img--zoomed { cursor: grab; border-radius: 0; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+/* 手势进行中去掉 transform 过渡，不然画面会跟不上手指 */
+.lb__img--live { cursor: grabbing; transition: opacity 0.5s var(--ease-out); }
 .lb__zoom { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; align-items: center; gap: 12px; padding: 7px 8px 7px 14px; border-radius: 999px; font-size: 0.75rem; letter-spacing: 0.06em; color: rgba(240,240,240,0.75); background: rgba(10,10,10,0.42); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.09); animation: lbFade 0.2s var(--ease-out); }
 @keyframes lbFade { from { opacity: 0; } to { opacity: 1; } }
 .lb__zoom button { padding: 3px 12px; border-radius: 999px; font-size: 0.75rem; color: rgba(240,240,240,0.85); background: rgba(255,255,255,0.1); transition: background 0.15s, color 0.15s; }
@@ -167,12 +174,19 @@ a       { color: inherit; text-decoration: none; }
 
 @media (max-width: 860px) {
   .lb__panel { top: auto; bottom: 14px; left: 14px; right: 14px; width: auto; max-width: none; max-height: 52dvh; }
-  .lb__view { padding: 20px; }
+  /* 上下留出操作区，图片就不会被按钮压住 */
+  .lb__view { padding: 64px 12px 84px; }
   .lb__stage { max-height: 100%; }
   .lb__img { max-width: calc(100% - 14px); max-height: calc(100% - 14px); box-shadow:
     0 0 0 1px rgba(0,0,0,0.22),
     0 0 0 7px rgba(249,247,243,0.93),
     0 14px 32px rgba(0,0,0,0.45); }
+  /* 手机上翻页按钮挪到底部中间，不再盖在画面上 */
+  .lb__nav { top: auto; bottom: 22px; transform: none; padding: 13px; background: rgba(10,10,10,0.45); transition: color 0.2s, background 0.2s, opacity 0.2s; }
+  .lb__nav--prev { left: calc(50% - 58px); }
+  .lb__nav--next { right: auto; left: calc(50% + 12px); }
+  /* 放大时底部是缩放指示条，信息面板打开时底部是面板，都别和翻页按钮打架 */
+  .lb--zoom .lb__nav, .lb--info .lb__nav { opacity: 0; pointer-events: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
