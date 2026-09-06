@@ -41,7 +41,7 @@ const CFG = {
   photo:     { maxW: 9.0, maxH: 4.9 },
   zoomMax:   6,
   zoomSpeed: 1.5,
-  hud:       { w: 7.2, y: 0.5, z: -9.4, tilt: -0.12 },
+  hud:       { w: 7.2, y: 0.15, z: -9.4, tilt: -0.12 },
   exitHoldMs: 900,
   /** 画质相关 */
   // three 默认 foveation = 1（边缘低分辨率），银幕铺满视野时正好糊在边缘上，关掉
@@ -117,7 +117,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   if (!photos.length) throw new Error('没有可播放的照片');
 
   const session = await navigator.xr!.requestSession('immersive-vr', {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
+    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
   });
 
   const scene = new THREE.Scene();
@@ -134,10 +134,10 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   // 关掉固定注视点渲染，整块银幕都按全分辨率画
   renderer.xr.setFoveation(CFG.foveation);
+  const nativeScale = nativeScaleOf(session);
+  const framebufferScale = Math.min(2, Math.max(CFG.renderScale, nativeScale));
   // 渲染分辨率取「不低于 renderScale」和「头显原生」里的较大者
-  renderer.xr.setFramebufferScaleFactor(
-    Math.min(2, Math.max(CFG.renderScale, nativeScaleOf(session)))
-  );
+  renderer.xr.setFramebufferScaleFactor(framebufferScale);
 
   // local-floor 拿不到就退回 local，至少能进得去
   try {
@@ -211,7 +211,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   /* ---------- 银幕下方的信息条 ---------- */
   const hudCanvas  = document.createElement('canvas');
   hudCanvas.width  = 2048;
-  hudCanvas.height = 256;
+  hudCanvas.height = 384;
   const hudCtx     = hudCanvas.getContext('2d')!;
   const hudTexture = new THREE.CanvasTexture(hudCanvas);
   hudTexture.colorSpace = THREE.SRGBColorSpace;
@@ -252,6 +252,278 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let texture: THREE.Texture | null = null;
   let disposed = false;
 
+  type PhotoLayerPainter = {
+    fb: WebGLFramebuffer;
+    tex: WebGLTexture;
+    program: WebGLProgram;
+    pos: WebGLBuffer;
+    uv: WebGLBuffer;
+    aPos: number;
+    aUv: number;
+    uTex: WebGLUniformLocation | null;
+    uUv: WebGLUniformLocation | null;
+  };
+
+  const gl = renderer.getContext();
+  let photoLayer: XRQuadLayer | null = null;
+  let photoLayerInState = false;
+  let photoLayerPixels = { w: 0, h: 0 };
+  let photoLayerImage: TexImageSource | null = null;
+  let photoLayerDirty = false;
+  let layerPainter: PhotoLayerPainter | null = null;
+  let layersUsable = Boolean(session.renderState.layers && typeof XRWebGLBinding !== 'undefined');
+  let layerStatus = layersUsable ? '等待创建 XRQuadLayer' : '浏览器未启用 WebXR Layers，使用 3D Plane 回退';
+  let sourcePixels = { w: 0, h: 0 };
+  let lastLayerPaintMs = 0;
+  let diagnosticsVersion = 0;
+
+  const layerFeature = session.enabledFeatures?.includes('layers') ? 'enabled' : 'not reported';
+  const bumpDiagnostics = () => { diagnosticsVersion++; };
+
+  const sizeText = (s: { w: number; h: number }) => s.w > 0 && s.h > 0 ? `${s.w}x${s.h}` : 'n/a';
+  const errorText = (e: unknown) => e instanceof Error ? e.message : String(e || '未知错误');
+
+  const baseLayerText = () => {
+    const base = renderer.xr.getBaseLayer() as
+      | XRWebGLLayer
+      | XRProjectionLayer
+      | undefined;
+    if (!base) return 'n/a';
+    const w = ('textureWidth' in base ? base.textureWidth : base?.framebufferWidth) ?? 0;
+    const h = ('textureHeight' in base ? base.textureHeight : base?.framebufferHeight) ?? 0;
+    return w > 0 && h > 0 ? `${w}x${h}` : 'n/a';
+  };
+
+  const diagnosticLines = () => {
+    const mode = photoLayer && photoLayerInState
+      ? 'XRQuadLayer ACTIVE'
+      : layersUsable
+        ? 'XRQuadLayer ready/hidden'
+        : '3D Plane FALLBACK';
+    const layerCount = session.renderState.layers?.length ?? 0;
+    return [
+      `VR显示路径: ${mode} | 原因: ${layerStatus}`,
+      `源图: ${sizeText(sourcePixels)} | QuadLayer: ${sizeText(photoLayerPixels)} | XR Base: ${baseLayerText()}`,
+      `features.layers: ${layerFeature} | XRWebGLBinding: ${typeof XRWebGLBinding !== 'undefined' ? 'yes' : 'no'} | renderState.layers: ${layerCount}`,
+      `renderScale: ${framebufferScale.toFixed(2)} | nativeScale: ${nativeScale.toFixed(2)} | maxTextureSize: ${maxTexSize}`,
+      `最近 layer 绘制: ${lastLayerPaintMs ? `${Math.round(performance.now() - lastLayerPaintMs)}ms前` : '未绘制'}`,
+    ];
+  };
+
+  const compile = (type: GLenum, src: string) => {
+    const shader = gl.createShader(type);
+    if (!shader) throw new Error('无法创建 WebGL shader');
+    gl.shaderSource(shader, src);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const msg = gl.getShaderInfoLog(shader) || 'WebGL shader 编译失败';
+      gl.deleteShader(shader);
+      throw new Error(msg);
+    }
+    return shader;
+  };
+
+  const ensureLayerPainter = (): PhotoLayerPainter => {
+    if (layerPainter) return layerPainter;
+    const vs = compile(gl.VERTEX_SHADER, `
+      attribute vec2 aPos;
+      attribute vec2 aUv;
+      varying vec2 vUv;
+      void main() {
+        vUv = aUv;
+        gl_Position = vec4(aPos, 0.0, 1.0);
+      }
+    `);
+    const fs = compile(gl.FRAGMENT_SHADER, `
+      precision mediump float;
+      varying vec2 vUv;
+      uniform sampler2D uTex;
+      uniform vec4 uUv;
+      void main() {
+        gl_FragColor = texture2D(uTex, uUv.xy + vUv * uUv.zw);
+      }
+    `);
+    const program = gl.createProgram();
+    if (!program) throw new Error('无法创建 WebGL program');
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const msg = gl.getProgramInfoLog(program) || 'WebGL program 链接失败';
+      gl.deleteProgram(program);
+      throw new Error(msg);
+    }
+
+    const pos = gl.createBuffer();
+    const uv = gl.createBuffer();
+    const tex = gl.createTexture();
+    const fb = gl.createFramebuffer();
+    if (!pos || !uv || !tex || !fb) throw new Error('无法创建 WebXR layer 绘制资源');
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, pos);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      -1, -1,  1, -1, -1,  1,
+      -1,  1,  1, -1,  1,  1,
+    ]), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, uv);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+      0, 0,  1, 0,  0, 1,
+      0, 1,  1, 0,  1, 1,
+    ]), gl.STATIC_DRAW);
+
+    layerPainter = {
+      fb, tex, program, pos, uv,
+      aPos: gl.getAttribLocation(program, 'aPos'),
+      aUv: gl.getAttribLocation(program, 'aUv'),
+      uTex: gl.getUniformLocation(program, 'uTex'),
+      uUv: gl.getUniformLocation(program, 'uUv'),
+    };
+    return layerPainter;
+  };
+
+  const setPhotoLayerInRenderState = (visible: boolean) => {
+    if (!photoLayer || !session.renderState.layers || photoLayerInState === visible) return;
+    const layers = session.renderState.layers.filter(layer => layer !== photoLayer);
+    void session.updateRenderState({ layers: visible ? [photoLayer, ...layers] : layers }).catch(e => {
+      layersUsable = false;
+      photoLayerInState = false;
+      layerStatus = `updateRenderState 失败: ${errorText(e)}`;
+      photoMat.opacity = 1;
+      photoMat.transparent = false;
+      photoMat.needsUpdate = true;
+      bumpDiagnostics();
+      drawHud();
+    });
+    photoLayerInState = visible;
+    layerStatus = visible ? 'layer 已加入 renderState.layers' : '照片墙打开，主图 layer 暂时隐藏';
+    photoMat.opacity = visible ? 0 : 1;
+    photoMat.transparent = visible;
+    photoMat.needsUpdate = true;
+    photoLayerDirty = visible || photoLayerDirty;
+    bumpDiagnostics();
+  };
+
+  const destroyPhotoLayer = () => {
+    if (!photoLayer) return;
+    setPhotoLayerInRenderState(false);
+    photoLayer.destroy();
+    photoLayer = null;
+    photoLayerPixels = { w: 0, h: 0 };
+  };
+
+  const syncPhotoLayer = (image: TexImageSource, w: number, h: number) => {
+    if (!layersUsable) return;
+    const space = renderer.xr.getReferenceSpace();
+    if (!space) {
+      layerStatus = '没有 XR referenceSpace，暂用 3D Plane';
+      bumpDiagnostics();
+      return;
+    }
+    try {
+      const img = image as { width?: number; height?: number };
+      const pixelW = Math.max(1, Math.min(maxTexSize, Math.round(img.width || 2048)));
+      const pixelH = Math.max(1, Math.min(maxTexSize, Math.round(img.height || 2048)));
+      const binding = renderer.xr.getBinding();
+      if (!binding?.createQuadLayer) {
+        layerStatus = 'XRWebGLBinding 不支持 createQuadLayer，暂用 3D Plane';
+        bumpDiagnostics();
+        return;
+      }
+      if (!photoLayer || photoLayerPixels.w !== pixelW || photoLayerPixels.h !== pixelH) {
+        destroyPhotoLayer();
+        photoLayer = binding.createQuadLayer({
+          space,
+          transform: new XRRigidTransform(
+            { x: 0, y: CFG.screen.y, z: CFG.screen.z },
+            { x: 0, y: 0, z: 0, w: 1 }
+          ),
+          width: w,
+          height: h,
+          viewPixelWidth: pixelW,
+          viewPixelHeight: pixelH,
+          layout: 'mono',
+          isStatic: false,
+        });
+        photoLayer.quality = 'graphics-optimized';
+        photoLayer.chromaticAberrationCorrection = true;
+        photoLayer.blendTextureSourceAlpha = false;
+        photoLayerPixels = { w: pixelW, h: pixelH };
+        layerStatus = '已创建原生 XRQuadLayer';
+      } else {
+        photoLayer.width = w;
+        photoLayer.height = h;
+        photoLayer.transform = new XRRigidTransform(
+          { x: 0, y: CFG.screen.y, z: CFG.screen.z },
+          { x: 0, y: 0, z: 0, w: 1 }
+        );
+      }
+      photoLayerImage = image;
+      photoLayerDirty = true;
+      setPhotoLayerInRenderState(true);
+      bumpDiagnostics();
+    } catch (e) {
+      layersUsable = false;
+      destroyPhotoLayer();
+      layerStatus = `XRQuadLayer 创建失败: ${errorText(e)}`;
+      bumpDiagnostics();
+    }
+  };
+
+  const paintPhotoLayer = (frame: XRFrame) => {
+    if (!photoLayer || !photoLayerImage || !photoLayerInState) return;
+    if (!photoLayerDirty && !photoLayer.needsRedraw) return;
+    try {
+      const binding = renderer.xr.getBinding();
+      const sub = binding.getSubImage(photoLayer, frame);
+      const p = ensureLayerPainter();
+
+      gl.bindTexture(gl.TEXTURE_2D, p.tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, photoLayerImage);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, p.fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sub.colorTexture, 0);
+      gl.viewport(sub.viewport.x, sub.viewport.y, sub.viewport.width, sub.viewport.height);
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.CULL_FACE);
+      gl.disable(gl.BLEND);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      gl.useProgram(p.program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, p.pos);
+      gl.enableVertexAttribArray(p.aPos);
+      gl.vertexAttribPointer(p.aPos, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, p.uv);
+      gl.enableVertexAttribArray(p.aUv);
+      gl.vertexAttribPointer(p.aUv, 2, gl.FLOAT, false, 0, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, p.tex);
+      gl.uniform1i(p.uTex, 0);
+      gl.uniform4f(p.uUv, offX, offY, 1 / zoom, 1 / zoom);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      renderer.state.reset();
+      photoLayerDirty = false;
+      lastLayerPaintMs = performance.now();
+      layerStatus = 'layer 已绘制当前照片';
+      bumpDiagnostics();
+      drawHud();
+    } catch (e) {
+      layersUsable = false;
+      destroyPhotoLayer();
+      layerStatus = `XRQuadLayer 绘制失败: ${errorText(e)}`;
+      bumpDiagnostics();
+      drawHud();
+    }
+  };
+
   const clampOffset = (x: number, y: number) => {
     const r = 1 / zoom;
     return {
@@ -268,27 +540,38 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     offY = o.y;
     texture.repeat.set(r, r);
     texture.offset.set(offX, offY);
+    photoLayerDirty = true;
   };
 
   // 缩放时每帧都重画 canvas 太费，内容没变就跳过
   let hudKey = '';
   const drawHud = (note?: string) => {
-    const key = `${index}|${Math.round(zoom * 100)}|${note ?? ''}`;
+    const key = `${index}|${Math.round(zoom * 100)}|${diagnosticsVersion}|${note ?? ''}`;
     if (key === hudKey) return;
     hudKey = key;
     const w = hudCanvas.width;
     hudCtx.clearRect(0, 0, w, hudCanvas.height);
     hudCtx.textAlign = 'center';
     hudCtx.fillStyle = 'rgba(255,255,255,0.9)';
-    hudCtx.font = '600 62px system-ui, -apple-system, sans-serif';
-    hudCtx.fillText(`${index + 1} / ${photos.length}　${photos[index].title}`, w / 2, 70);
+    hudCtx.font = '600 54px system-ui, -apple-system, sans-serif';
+    hudCtx.fillText(`${index + 1} / ${photos.length}　${photos[index].title}`, w / 2, 62);
     hudCtx.fillStyle = 'rgba(255,255,255,0.45)';
-    hudCtx.font = '400 40px system-ui, -apple-system, sans-serif';
+    hudCtx.font = '400 34px system-ui, -apple-system, sans-serif';
     const tip = note
       ?? (zoom > 1.01
         ? `已放大 ${Math.round(zoom * 100)}% · 扳机拖动 · 摇杆按下复位`
         : '摇杆上下 缩放 · 左右 翻页 · 扳机按住 拖动 · 摇杆按下 复位 · 长按侧键 退出');
-    hudCtx.fillText(tip, w / 2, 150);
+    hudCtx.fillText(tip, w / 2, 118);
+
+    hudCtx.textAlign = 'left';
+    hudCtx.font = '400 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    hudCtx.fillStyle = photoLayer && photoLayerInState
+      ? 'rgba(145,255,180,0.88)'
+      : 'rgba(255,204,128,0.88)';
+    const lines = diagnosticLines();
+    for (let i = 0; i < lines.length; i++) {
+      hudCtx.fillText(lines[i], 88, 174 + i * 38);
+    }
     hudTexture.needsUpdate = true;
   };
 
@@ -325,14 +608,22 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
         texture = prepare(tex);
 
         const img = tex.image as { width?: number; height?: number };
+        sourcePixels = {
+          w: Math.round(img.width || 0),
+          h: Math.round(img.height || 0),
+        };
+        bumpDiagnostics();
         const aspect = img?.width && img?.height ? img.width / img.height : 3 / 2;
         let w = CFG.photo.maxW;
         let h = w / aspect;
         if (h > CFG.photo.maxH) { h = CFG.photo.maxH; w = h * aspect; }
         photo.scale.set(w, h, 1);
+        syncPhotoLayer(tex.image as TexImageSource, w, h);
 
         photoMat.map = tex;
         photoMat.color.set(0xffffff);
+        photoMat.opacity = photoLayer && photoLayerInState ? 0 : 1;
+        photoMat.transparent = Boolean(photoLayer && photoLayerInState);
         photoMat.needsUpdate = true;
         apply();
         drawHud();
@@ -361,8 +652,16 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
         if (cur?.width && next?.width && next.width <= cur.width) { tex.dispose(); return; }
         texture?.dispose();
         texture = prepare(tex);
+        sourcePixels = {
+          w: Math.round((tex.image as { width?: number }).width || 0),
+          h: Math.round((tex.image as { height?: number }).height || 0),
+        };
+        bumpDiagnostics();
         photoMat.map = tex;
+        photoMat.opacity = photoLayer && photoLayerInState ? 0 : 1;
+        photoMat.transparent = Boolean(photoLayer && photoLayerInState);
         photoMat.needsUpdate = true;
+        syncPhotoLayer(tex.image as TexImageSource, photo.scale.x, photo.scale.y);
         apply();
       },
       undefined,
@@ -428,6 +727,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     picker.setOpen(next);
     // 照片墙打开时压暗银幕，免得和缩略图抢注意力
     photoMat.color.set(next ? 0x2b2b2b : texture ? 0xffffff : 0x111111);
+    setPhotoLayerInRenderState(!next);
     hud.visible = !next;
     drawHud();
   };
@@ -618,6 +918,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     last = now;
     readInput(frame, now, dt);
     picker.update(dt);
+    paintPhotoLayer(frame);
     // 放大到一定程度就换更高分辨率的图，保证放大后还看得清细节
     if (!hiResDone && zoom > CFG.hiResFrom) {
       hiResDone = true;
@@ -642,6 +943,15 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       else mat?.dispose();
     });
     picker.dispose();
+    destroyPhotoLayer();
+    if (layerPainter) {
+      gl.deleteFramebuffer(layerPainter.fb);
+      gl.deleteTexture(layerPainter.tex);
+      gl.deleteProgram(layerPainter.program);
+      gl.deleteBuffer(layerPainter.pos);
+      gl.deleteBuffer(layerPainter.uv);
+      layerPainter = null;
+    }
     rayGeom.dispose();
     texture?.dispose();
     hudTexture.dispose();
