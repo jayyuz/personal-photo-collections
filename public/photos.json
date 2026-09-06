@@ -1,5 +1,100 @@
 [
   {
+    "id": "1788686239999-nhsu4",
+    "title": "DSC 0208",
+    "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788686239/photography/hs7dp6cdvkyk6qdsnhgt.jpg",
+    "span": "tall",
+    "year": 2026,
+    "tint": "rgba(220,80,60,0.25)",
+    "exif": {
+      "camera": "NIKON Z 50",
+      "lens": "NIKKOR Z DX 16-50mm f/3.5-6.3 VR",
+      "focal": 50,
+      "aperture": 6.3,
+      "shutter": 0.004,
+      "iso": 110,
+      "width": 5568,
+      "height": 3712,
+      "shotAt": "2023-09-29T10:06:36.000Z"
+    }
+  },
+  {
+    "id": "1788686244525-lgv3j",
+    "title": "DSC 0051",
+    "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788686243/photography/ls17llu0hdd9s9axg5tq.jpg",
+    "span": "tall",
+    "year": 2026,
+    "tint": "rgba(220,80,60,0.25)",
+    "exif": {
+      "camera": "NIKON Z 50",
+      "lens": "NIKKOR Z DX 16-50mm f/3.5-6.3 VR",
+      "focal": 18.5,
+      "aperture": 6.3,
+      "shutter": 0.003125,
+      "iso": 100,
+      "width": 5568,
+      "height": 3712,
+      "shotAt": "2023-09-29T06:44:40.000Z"
+    }
+  },
+  {
+    "id": "1788686249642-r05cu",
+    "title": "DSC 0102",
+    "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788686248/photography/oudkeob2mcs74qxkkop0.jpg",
+    "span": "tall",
+    "year": 2026,
+    "tint": "rgba(220,80,60,0.25)",
+    "exif": {
+      "camera": "NIKON Z 50",
+      "lens": "NIKKOR Z DX 16-50mm f/3.5-6.3 VR",
+      "focal": 27.5,
+      "aperture": 6.3,
+      "shutter": 0.003125,
+      "iso": 100,
+      "width": 5568,
+      "height": 3712,
+      "shotAt": "2023-09-29T07:18:00.000Z"
+    }
+  },
+  {
+    "id": "1788686253230-20tgy",
+    "title": "DSC 1243",
+    "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788686252/photography/oab4w5ngxdidqke2lruc.jpg",
+    "span": "tall",
+    "year": 2026,
+    "tint": "rgba(220,80,60,0.25)",
+    "exif": {
+      "camera": "NIKON Z 50",
+      "lens": "NIKKOR Z DX 16-50mm f/3.5-6.3 VR",
+      "focal": 50,
+      "aperture": 6.3,
+      "shutter": 0.004,
+      "iso": 320,
+      "width": 5568,
+      "height": 3712,
+      "shotAt": "2023-10-02T09:56:35.000Z"
+    }
+  },
+  {
+    "id": "1788686261632-wj01p",
+    "title": "DSC 2815",
+    "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788686260/photography/tdufiqfw5niaxrsgy2kg.jpg",
+    "span": "tall",
+    "year": 2026,
+    "tint": "rgba(220,80,60,0.25)",
+    "exif": {
+      "camera": "NIKON Z 50",
+      "lens": "MEKE 55mmF1.4Z",
+      "focal": 55,
+      "aperture": 1.4,
+      "shutter": 0.002,
+      "iso": 125,
+      "width": 5568,
+      "height": 3712,
+      "shotAt": "2025-01-31T01:35:52.000Z"
+    }
+  },
+  {
     "id": "1788686161298-ejn7b",
     "title": "DSC 0053",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788686160/photography/zfkkx4cgkvgrtbbxqtig.jpg",
