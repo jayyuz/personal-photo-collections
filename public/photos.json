@@ -528,7 +528,8 @@
       "y": 0.449462890625
     },
     "aesthetic": 0.4964,
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "cover": true
   },
   {
     "id": "1788773472216-txts9",
@@ -43488,7 +43489,6 @@
       "height": 3712,
       "shotAt": "2024-12-14T07:23:36.000Z"
     },
-    "cover": true,
     "tags": [
       "风景"
     ],
