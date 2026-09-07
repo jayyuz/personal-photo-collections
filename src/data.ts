@@ -34,9 +34,11 @@ export interface Photo {
   exif?: PhotoExif;
   /** 零样本标签，如 花卉 / 街拍。功能 2 写入 */
   tags?: string[];
-  /** Chinese-CLIP 图像向量。功能 1 写入，供语义检索 */
+  /** MobileCLIP 图像向量。功能 1 写入，供相似推荐 */
   embedding?: number[];
-  /** CLIPSeg 主体重心。功能 3 写入 */
+  /** 产出上面那条向量的模型；换了模型就得据此作废旧向量 */
+  embedModel?: string;
+  /** DETR 主体重心。功能 3 写入 */
   focus?: PhotoFocus;
   /** 0–1，越高越适合做封面。功能 3 写入 */
   aesthetic?: number;

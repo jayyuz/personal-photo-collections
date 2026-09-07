@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Photo } from './data';
-import { embedImage, scoreLabels } from './ml/clip';
-import { THEME_LABELS, isGenericTitle, pickTags, titleFromTags } from './ml/tagging';
+import { embedImage, EMBED_MODEL } from './ml/clip';
+import { classifyThemes, isGenericTitle, pickTags, titleFromTags } from './ml/tagging';
 import { tintFromImage } from './ml/palette';
 
 export type QueuePatch = {
@@ -9,6 +9,7 @@ export type QueuePatch = {
   tags?: string[];
   tint?: string;
   embedding?: number[];
+  embedModel?: string;
 };
 
 export function QueueSmart({
@@ -28,23 +29,25 @@ export function QueueSmart({
     if (!items.length || busy) return;
     setBusy(true);
     let failed = 0;
+    let unsure = 0;
     try {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         onStatus({ type: 'ok', msg: `分析 ${i + 1}/${items.length}：${item.title}…` });
         try {
-          const embedding = await embedImage(item.preview);
-          const scored = await scoreLabels(embedding, THEME_LABELS);
-          const tags = pickTags(scored);
+          const embedding = await embedImage(item.preview, msg => onStatus({ type: 'ok', msg }));
+          const tags = pickTags(await classifyThemes(embedding));
+          if (!tags.length) unsure += 1;
           let tint: string | undefined;
           try {
             tint = await tintFromImage(item.preview);
           } catch {
             /* 取色失败不影响标签 */
           }
-          const patch: QueuePatch = { tags, embedding };
+          const patch: QueuePatch = { tags, embedding, embedModel: EMBED_MODEL };
           if (tint) patch.tint = tint;
-          if (isGenericTitle(item.title)) {
+          // 标签本身都不确定时，别拿它去改标题
+          if (tags.length && isGenericTitle(item.title)) {
             patch.title = titleFromTags(tags, item.title);
           }
           onPatch(item.localId, patch);
@@ -56,12 +59,13 @@ export function QueueSmart({
           });
         }
       }
+      const unsureNote = unsure ? `，${unsure} 张没把握、未打标签` : '';
       if (failed === 0) {
-        onStatus({ type: 'ok', msg: `已分析 ${items.length} 张：标签与色调` });
+        onStatus({ type: 'ok', msg: `已分析 ${items.length} 张：标签与色调${unsureNote}` });
       } else if (failed < items.length) {
         onStatus({
           type: 'err',
-          msg: `完成 ${items.length - failed}/${items.length} 张，${failed} 张失败`,
+          msg: `完成 ${items.length - failed}/${items.length} 张，${failed} 张失败${unsureNote}`,
         });
       }
     } finally {
@@ -99,7 +103,14 @@ export function PublishedSmart({
 
   const run = async () => {
     if (busy) return;
-    const missing = photos.filter(p => !p.embedding?.length || !p.tags?.length);
+    // 换模型留下的旧向量已经在 toPhoto 里被丢掉，所以这里数出来的就是待补的；
+    // 只改了提示词的话向量仍然有效，但标签会变，所以也留一条整体重算的路
+    const pending = photos.filter(p => !p.embedding?.length);
+    const missing = pending.length
+      ? pending
+      : window.confirm(`所有照片都已有索引。要用当前模型重算这 ${photos.length} 张吗？`)
+        ? photos
+        : [];
     if (!missing.length) {
       onStatus({ type: 'ok', msg: '所有照片都已有语义索引' });
       return;
@@ -116,9 +127,9 @@ export function PublishedSmart({
           const embedding = await embedImage(photo.src, msg =>
             onStatus({ type: 'ok', msg }),
           );
-          const scored = await scoreLabels(embedding, THEME_LABELS);
-          const tags = pickTags(scored);
-          next = next.map(p => p.id === photo.id ? { ...p, embedding, tags } : p);
+          const tags = pickTags(await classifyThemes(embedding));
+          next = next.map(p =>
+            p.id === photo.id ? { ...p, embedding, embedModel: EMBED_MODEL, tags } : p);
           onUpdate(next);
           succeeded += 1;
         } catch (e) {
@@ -143,14 +154,16 @@ export function PublishedSmart({
     }
   };
 
-  const missingCount = photos.filter(p => !p.embedding?.length || !p.tags?.length).length;
+  const missingCount = photos.filter(p => !p.embedding?.length).length;
   return (
     <button
       type="button"
       className="apf__mini"
       disabled={disabled || busy || photos.length === 0}
       onClick={() => void run()}
-      title={`为旧照片补齐标签和 Chinese-CLIP 向量${missingCount ? `（${missingCount} 张）` : ''}`}
+      title={missingCount
+        ? `为 ${missingCount} 张照片补齐标签和 MobileCLIP 向量`
+        : '全部已索引，点击可用当前模型重算'}
     >
       {busy ? '索引中…' : `语义索引${missingCount ? ` · ${missingCount}` : ''}`}
     </button>

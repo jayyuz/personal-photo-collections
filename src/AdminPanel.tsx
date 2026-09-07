@@ -69,6 +69,7 @@ interface PendingItem {
   tags?:      string[];
   tint?:      string;
   embedding?: number[];
+  embedModel?: string;
   focus?:     PhotoFocus;
   aesthetic?: number;
 }
@@ -709,6 +710,7 @@ export function AdminPanel({
           exif,
           tags:      item.tags,
           embedding: item.embedding,
+          embedModel: item.embedModel,
           focus:     item.focus,
           aesthetic: item.aesthetic,
         });
@@ -1264,6 +1266,7 @@ export function AdminPanel({
                         ...p,
                         tags: u.tags ?? p.tags,
                         embedding: u.embedding ?? p.embedding,
+                        embedModel: u.embedModel ?? p.embedModel,
                       };
                     });
                     await savePhotosMeta(merged, cfg, message);

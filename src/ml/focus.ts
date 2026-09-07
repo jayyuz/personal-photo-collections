@@ -6,13 +6,29 @@
  */
 import type { PhotoFocus } from '../data';
 import { mlImageSrc } from './imageSrc';
-import { dtypeFor, pickDevice } from './runtime';
-import { embedImage, scoreLabels, type ClipProgress } from './clip';
+import { detectorDtype, pickDevice } from './runtime';
+import { embedImage, scoreGroups, type ClipProgress } from './clip';
 
 export const FOCUS_MODEL = 'Xenova/detr-resnet-50';
 
-const GOOD = '构图精美的专业摄影作品，光线出色，画面清晰';
-const BAD = '模糊失败的废片，过曝或构图很差';
+// 提示词用英文，理由同 ml/tagging.ts：MobileCLIP 只认英文
+const GOOD = 'good';
+const AESTHETIC_GROUPS = [
+  {
+    label: GOOD,
+    prompts: [
+      'a well composed professional photograph, sharp and beautifully lit',
+      'an award winning photo worth hanging on a wall',
+    ],
+  },
+  {
+    label: 'bad',
+    prompts: [
+      'a blurry out of focus photo, smeared and unusable',
+      'a badly exposed cluttered casual snapshot',
+    ],
+  },
+];
 
 interface Detection {
   label: string;
@@ -37,7 +53,7 @@ async function loadDetector(onProgress?: ClipProgress): Promise<void> {
     const device = await pickDevice();
     detector = await pipeline('object-detection', FOCUS_MODEL, {
       device,
-      dtype: dtypeFor(device),
+      dtype: detectorDtype(device),
     }) as Detector;
     onProgress?.(`主体定位模型已就绪（${device}）`);
   })();
@@ -74,14 +90,12 @@ export async function focusFromImage(src: string, onProgress?: ClipProgress): Pr
   };
 }
 
-/** 用 CLIP 对「好照片 / 坏照片」打分，不另下模型 */
+/** 用 CLIP 对「好照片 / 废片」二选一，取好照片那一侧的概率，不另下模型 */
 export async function aestheticFromImage(src: string, onProgress?: ClipProgress): Promise<number> {
   const img = await embedImage(src, onProgress);
-  const scored = await scoreLabels(img, [GOOD, BAD], onProgress);
-  const good = scored.find(s => s.label === GOOD)?.score ?? 0;
-  const bad = scored.find(s => s.label === BAD)?.score ?? 0;
-  const raw = (good - bad + 1) / 2;
-  return Math.round(Math.min(1, Math.max(0, raw)) * 1e4) / 1e4;
+  const scored = await scoreGroups(img, AESTHETIC_GROUPS, onProgress);
+  const good = scored.find(s => s.label === GOOD)?.prob ?? 0.5;
+  return Math.round(Math.min(1, Math.max(0, good)) * 1e4) / 1e4;
 }
 
 export function suggestCoverId(photos: { id: string; aesthetic?: number }[]): string | undefined {

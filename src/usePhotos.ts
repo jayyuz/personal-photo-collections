@@ -5,6 +5,7 @@
  */
 import { useState, useEffect } from 'react';
 import type { Photo, PhotoExif, PhotoFocus, PhotoSpan } from './data';
+import { EMBED_MODEL } from './ml/clip';
 
 export interface ApiPhoto {
   id:        string;
@@ -18,6 +19,7 @@ export interface ApiPhoto {
   exif?:     PhotoExif;
   tags?:     string[];
   embedding?: number[];
+  embedModel?: string;
   focus?:    PhotoFocus;
   aesthetic?: number;
 }
@@ -32,6 +34,9 @@ function finiteFocus(f?: PhotoFocus): PhotoFocus | undefined {
 }
 
 export function toPhoto(p: ApiPhoto): Photo {
+  // 换模型后旧向量维度可能碰巧还一样，语义空间却已经不同。在数据入口就丢掉，
+  // 检索、相似推荐、Admin 的待索引计数便一次性都看到正确的状态。
+  const usableVec = !!p.embedding?.length && p.embedModel === EMBED_MODEL;
   return {
     id:        p.id,
     title:     p.title,
@@ -43,7 +48,8 @@ export function toPhoto(p: ApiPhoto): Photo {
     cover:     p.cover || undefined,
     exif:      p.exif  || undefined,
     tags:      p.tags?.length ? p.tags : undefined,
-    embedding: p.embedding?.length ? p.embedding : undefined,
+    embedding: usableVec ? p.embedding : undefined,
+    embedModel: usableVec ? p.embedModel : undefined,
     focus:     finiteFocus(p.focus),
     aesthetic: Number.isFinite(p.aesthetic) ? p.aesthetic : undefined,
   };

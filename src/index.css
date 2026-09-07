@@ -408,9 +408,6 @@ a       { color: inherit; text-decoration: none; }
 .gsearch__field { display: flex; align-items: center; gap: 9px; flex: 0 1 280px; min-width: 190px; padding: 8px 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); transition: border-color 0.2s; }
 .gsearch__field:focus-within { border-color: rgba(255,255,255,0.28); }
 .gsearch__icon { flex-shrink: 0; color: var(--muted); opacity: 0.55; }
-/* 模型在下载 / 推理时让放大镜自己呼吸一下，不另外加进度条 */
-.gsearch__field--busy .gsearch__icon { animation: gsPulse 1.2s ease-in-out infinite; }
-@keyframes gsPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.95; } }
 .gsearch__input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: var(--fg); font-family: var(--f-body); font-size: 0.8125rem; letter-spacing: 0.06em; appearance: none; -webkit-appearance: none; }
 .gsearch__input::placeholder { color: rgba(240,240,240,0.3); letter-spacing: 0.08em; }
 .gsearch__input::-webkit-search-cancel-button, .gsearch__input::-webkit-search-decoration { display: none; }
@@ -423,7 +420,6 @@ a       { color: inherit; text-decoration: none; }
 .gsearch__chip--on { color: var(--bg); background: var(--fg); border-color: var(--fg); }
 .gsearch__chip:focus-visible { outline: 1px solid var(--fg); outline-offset: 3px; }
 .gsearch__note { max-width: 1480px; margin: 9px auto 0; font-size: 0.6875rem; letter-spacing: 0.08em; color: var(--muted); opacity: 0.7; }
-.gsearch__note--warn { color: rgba(220,140,40,0.85); opacity: 1; }
 
 /* 灯箱里的相似一排 */
 .lb__similar { position: absolute; left: 50%; bottom: 18px; z-index: 3; transform: translateX(-50%); max-width: calc(100% - 40px); display: flex; align-items: center; gap: 7px; padding: 7px 12px 7px 14px; border-radius: 999px; overflow-x: auto; scrollbar-width: none; background: rgba(10,10,10,0.42); border: 1px solid rgba(255,255,255,0.09); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); animation: lbFade 0.3s var(--ease-out) 0.16s backwards; }
@@ -454,6 +450,5 @@ a       { color: inherit; text-decoration: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gsearch__field--busy .gsearch__icon { animation: none; opacity: 0.9; }
   .lb__similar-thumb:hover { transform: none; }
 }
