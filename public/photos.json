@@ -1056,7 +1056,12 @@
       0.0359,
       -0.0111
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.51220703125
+    },
+    "aesthetic": 0.2994
   },
   {
     "id": "1788743221022-q1rad",
@@ -1593,7 +1598,12 @@
       -0.0075,
       0.0299
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.52880859375,
+      "y": 0.625
+    },
+    "aesthetic": 0.4939
   },
   {
     "id": "1788718854637-ak3z8",
@@ -2130,7 +2140,12 @@
       0.007,
       0.0199
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.311767578125,
+      "y": 0.459716796875
+    },
+    "aesthetic": 0.1975
   },
   {
     "id": "1788718871236-xptxl",
@@ -2667,7 +2682,12 @@
       -0.0102,
       0.0118
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2504
   },
   {
     "id": "1788718878578-soysk",
@@ -3204,7 +3224,12 @@
       -0.0045,
       0.0123
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.59814453125,
+      "y": 0.6640625
+    },
+    "aesthetic": 0.1919
   },
   {
     "id": "1788718886638-b0vai",
@@ -3742,7 +3767,12 @@
       0.0219,
       0.047
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.4931640625,
+      "y": 0.6318359375
+    },
+    "aesthetic": 0.0749
   },
   {
     "id": "1788718903883-lkfry",
@@ -4280,7 +4310,12 @@
       -0.0065,
       0.0485
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.440185546875,
+      "y": 0.5986328125
+    },
+    "aesthetic": 0.0747
   },
   {
     "id": "1788718905364-dq9cy",
@@ -4817,7 +4852,12 @@
       0.0364,
       -0.0052
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.552734375,
+      "y": 0.556640625
+    },
+    "aesthetic": 0.0655
   },
   {
     "id": "1788718924546-eysbf",
@@ -5355,7 +5395,12 @@
       0.0049,
       0.0024
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.494140625,
+      "y": 0.491455078125
+    },
+    "aesthetic": 0.2729
   },
   {
     "id": "1788718937955-clxy8",
@@ -5891,7 +5936,12 @@
       0.0205,
       -0.0222
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.57763671875,
+      "y": 0.50048828125
+    },
+    "aesthetic": 0.1801
   },
   {
     "id": "1788718951950-rnpnk",
@@ -6427,7 +6477,12 @@
       0.0072,
       -0.0163
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.4970703125,
+      "y": 0.50048828125
+    },
+    "aesthetic": 0.2898
   },
   {
     "id": "1788718430695-whrdb",
@@ -6966,7 +7021,12 @@
       -0.013,
       0.003
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.316162109375,
+      "y": 0.138427734375
+    },
+    "aesthetic": 0.6694
   },
   {
     "id": "1788718437715-lwmsn",
@@ -7503,7 +7563,12 @@
       -0.0534,
       0.0422
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.054412841796875,
+      "y": 0.9091796875
+    },
+    "aesthetic": 0.8476
   },
   {
     "id": "1788718444699-gt4x3",
@@ -8041,7 +8106,12 @@
       -0.0032,
       0.027
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.88134765625,
+      "y": 0.703125
+    },
+    "aesthetic": 0.6982
   },
   {
     "id": "1788718449670-i0aai",
@@ -8579,7 +8649,12 @@
       0.0104,
       0.0135
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5107421875,
+      "y": 0.7021484375
+    },
+    "aesthetic": 0.5959
   },
   {
     "id": "1788718454363-ahowt",
@@ -9117,7 +9192,12 @@
       -0.0136,
       0.0185
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.55908203125,
+      "y": 0.55615234375
+    },
+    "aesthetic": 0.4736
   },
   {
     "id": "1788718461067-c45q0",
@@ -9654,7 +9734,12 @@
       -0.0391,
       0.0267
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5400390625,
+      "y": 0.5859375
+    },
+    "aesthetic": 0.4732
   },
   {
     "id": "1788718467700-wb5jh",
@@ -10192,7 +10277,12 @@
       -0.0388,
       0.077
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.51123046875,
+      "y": 0.625
+    },
+    "aesthetic": 0.1485
   },
   {
     "id": "1788718470328-03tcf",
@@ -10729,7 +10819,12 @@
       -0.0009,
       -0.0054
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.400634765625,
+      "y": 0.5693359375
+    },
+    "aesthetic": 0.054
   },
   {
     "id": "1788718476446-skia5",
@@ -11266,7 +11361,12 @@
       -0.0237,
       0.0022
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.2392578125,
+      "y": 0.73046875
+    },
+    "aesthetic": 0.6657
   },
   {
     "id": "1788718483882-0sj4o",
@@ -11804,7 +11904,12 @@
       -0.0487,
       0.0482
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.7138671875,
+      "y": 0.56591796875
+    },
+    "aesthetic": 0.3048
   },
   {
     "id": "1788718489533-gteh4",
@@ -12340,7 +12445,12 @@
       0.034,
       0.0218
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.51220703125,
+      "y": 0.58642578125
+    },
+    "aesthetic": 0.5025
   },
   {
     "id": "1788718494979-k8wck",
@@ -12876,7 +12986,12 @@
       0.0247,
       0.0181
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.50439453125,
+      "y": 0.69580078125
+    },
+    "aesthetic": 0.0554
   },
   {
     "id": "1788718509214-p0ie5",
@@ -13413,7 +13528,12 @@
       0.0007,
       0.0407
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.56689453125
+    },
+    "aesthetic": 0.2262
   },
   {
     "id": "1788718514031-zy7lo",
@@ -13950,7 +14070,12 @@
       -0.0307,
       0.0327
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.333740234375,
+      "y": 0.607421875
+    },
+    "aesthetic": 0.2967
   },
   {
     "id": "1788718539929-1l8s4",
@@ -14487,7 +14612,12 @@
       -0.0234,
       0.0379
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.486572265625,
+      "y": 0.60498046875
+    },
+    "aesthetic": 0.2146
   },
   {
     "id": "1788718545456-iewh3",
@@ -15024,7 +15154,12 @@
       -0.0067,
       0.039
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5078125,
+      "y": 0.6572265625
+    },
+    "aesthetic": 0.3808
   },
   {
     "id": "1788718570698-5lo4b",
@@ -15561,7 +15696,12 @@
       -0.0186,
       0.0474
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.53515625,
+      "y": 0.6083984375
+    },
+    "aesthetic": 0.2869
   },
   {
     "id": "1788718586931-62n54",
@@ -16098,7 +16238,12 @@
       -0.0243,
       0.0427
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.456787109375,
+      "y": 0.6865234375
+    },
+    "aesthetic": 0.1798
   },
   {
     "id": "1788718599713-em4ca",
@@ -16636,7 +16781,12 @@
       0.0035,
       0.009
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.8113
   },
   {
     "id": "1788691930589-4s68v",
@@ -17173,7 +17323,12 @@
       0.0065,
       -0.033
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5244140625,
+      "y": 0.5810546875
+    },
+    "aesthetic": 0.1818
   },
   {
     "id": "1788691934853-xkhib",
@@ -17711,7 +17866,12 @@
       0.0463,
       -0.0103
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.49755859375,
+      "y": 0.5869140625
+    },
+    "aesthetic": 0.7802
   },
   {
     "id": "1788691939847-e4zmc",
@@ -18249,7 +18409,12 @@
       0.0172,
       0.0079
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.5267
   },
   {
     "id": "1788691943833-a0ooq",
@@ -18787,7 +18952,12 @@
       0.0067,
       -0.0013
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.55419921875,
+      "y": 0.58837890625
+    },
+    "aesthetic": 0.7541
   },
   {
     "id": "1788691949432-lggbj",
@@ -19324,7 +19494,12 @@
       0.0021,
       0.0219
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.5829
   },
   {
     "id": "1788691950930-hutp1",
@@ -19861,7 +20036,12 @@
       0.0019,
       0.0083
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.58203125,
+      "y": 0.62353515625
+    },
+    "aesthetic": 0.7006
   },
   {
     "id": "1788691955844-rd4x9",
@@ -20398,7 +20578,12 @@
       0.0426,
       0.0054
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.560546875,
+      "y": 0.544921875
+    },
+    "aesthetic": 0.7988
   },
   {
     "id": "1788691960871-ahuhy",
@@ -20935,7 +21120,12 @@
       0.0359,
       0.0115
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.50048828125,
+      "y": 0.64892578125
+    },
+    "aesthetic": 0.6903
   },
   {
     "id": "1788691969353-xeuin",
@@ -21472,7 +21662,12 @@
       0.0267,
       -0.0167
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.3759765625,
+      "y": 0.65380859375
+    },
+    "aesthetic": 0.3668
   },
   {
     "id": "1788691974668-67j69",
@@ -22009,7 +22204,12 @@
       -0.0112,
       0.0498
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.671875,
+      "y": 0.66650390625
+    },
+    "aesthetic": 0.1737
   },
   {
     "id": "1788690739172-jn1ec",
@@ -22545,7 +22745,12 @@
       0.0205,
       0.0119
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.5874
   },
   {
     "id": "1788690739172-q9kxw",
@@ -23082,7 +23287,12 @@
       -0.0141,
       -0.0137
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.5751
   },
   {
     "id": "1788690739172-epewd",
@@ -23618,7 +23828,12 @@
       0.0029,
       -0.0157
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.7451
   },
   {
     "id": "1788690739172-7p7og",
@@ -24155,7 +24370,12 @@
       -0.0259,
       -0.0047
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.505
   },
   {
     "id": "1788690739172-86158",
@@ -24691,7 +24911,12 @@
       0.0283,
       0.0328
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.474853515625,
+      "y": 0.9716796875
+    },
+    "aesthetic": 0.3813
   },
   {
     "id": "1788690739172-7ra9o",
@@ -25227,7 +25452,12 @@
       -0.0143,
       0.0257
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.576171875,
+      "y": 0.490478515625
+    },
+    "aesthetic": 0.2048
   },
   {
     "id": "1788690308374-1uvu0",
@@ -25763,7 +25993,12 @@
       -0.0076,
       0.0418
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.3108
   },
   {
     "id": "1788690315360-13adi",
@@ -26299,7 +26534,12 @@
       0.0197,
       0.009
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.50048828125
+    },
+    "aesthetic": 0.4876
   },
   {
     "id": "1788690353240-o99jf",
@@ -26835,7 +27075,12 @@
       0.0098,
       0.0574
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.5617
   },
   {
     "id": "1788690356058-1qq1v",
@@ -27371,7 +27616,12 @@
       -0.0129,
       0.005
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.52685546875,
+      "y": 0.5966796875
+    },
+    "aesthetic": 0.2719
   },
   {
     "id": "1788690377377-lfk0g",
@@ -27907,7 +28157,12 @@
       -0.0143,
       -0.0016
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.59033203125,
+      "y": 0.58251953125
+    },
+    "aesthetic": 0.3104
   },
   {
     "id": "1788690391343-k93wn",
@@ -28443,7 +28698,12 @@
       -0.006,
       0.0474
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.54931640625,
+      "y": 0.53515625
+    },
+    "aesthetic": 0.3968
   },
   {
     "id": "1788690394218-p6xdb",
@@ -28979,7 +29239,12 @@
       -0.0285,
       0.0215
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.51025390625,
+      "y": 0.5263671875
+    },
+    "aesthetic": 0.4905
   },
   {
     "id": "1788690413575-m1zos",
@@ -29516,7 +29781,12 @@
       -0.0118,
       0.0112
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5830078125,
+      "y": 0.55712890625
+    },
+    "aesthetic": 0.0936
   },
   {
     "id": "1788690419492-2bc4k",
@@ -30052,7 +30322,12 @@
       0.0057,
       0.0667
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5234375,
+      "y": 0.58837890625
+    },
+    "aesthetic": 0.2782
   },
   {
     "id": "1788690481336-d16a5",
@@ -30588,7 +30863,12 @@
       -0.0018,
       -0.0049
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.487548828125,
+      "y": 0.51416015625
+    },
+    "aesthetic": 0.1385
   },
   {
     "id": "1788690495803-1vf6n",
@@ -31124,7 +31404,12 @@
       0.0095,
       0.0453
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.6044921875,
+      "y": 0.6416015625
+    },
+    "aesthetic": 0.2398
   },
   {
     "id": "1788690514575-xg3kr",
@@ -31660,7 +31945,12 @@
       -0.0129,
       0.0063
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.52783203125,
+      "y": 0.609375
+    },
+    "aesthetic": 0.4257
   },
   {
     "id": "1788690520683-cthk8",
@@ -32196,7 +32486,12 @@
       -0.0225,
       0.0463
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.525390625,
+      "y": 0.6044921875
+    },
+    "aesthetic": 0.1204
   },
   {
     "id": "1788690567874-wt42g",
@@ -32732,7 +33027,12 @@
       0.007,
       -0.0232
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5009765625
+    },
+    "aesthetic": 0.7161
   },
   {
     "id": "1788690571564-y91m3",
@@ -33268,7 +33568,12 @@
       -0.0128,
       -0.0149
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.696
   },
   {
     "id": "1788690589497-y70lm",
@@ -33804,7 +34109,12 @@
       -0.0522,
       0
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.544921875,
+      "y": 0.53857421875
+    },
+    "aesthetic": 0.5563
   },
   {
     "id": "1788690605692-j3bxz",
@@ -34340,7 +34650,12 @@
       -0.0051,
       -0.0191
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.49951171875,
+      "y": 0.5
+    },
+    "aesthetic": 0.8435
   },
   {
     "id": "1788690612464-o0wpb",
@@ -34876,7 +35191,12 @@
       0.0015,
       -0.0155
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.59521484375,
+      "y": 0.56640625
+    },
+    "aesthetic": 0.7767
   },
   {
     "id": "1788690687271-lwtsy",
@@ -35412,7 +35732,12 @@
       -0.0094,
       -0.0227
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.68115234375
+    },
+    "aesthetic": 0.6717
   },
   {
     "id": "1788689349838-0fov6",
@@ -35949,7 +36274,12 @@
       0.0336,
       -0.0031
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.45458984375,
+      "y": 0.472412109375
+    },
+    "aesthetic": 0.3196
   },
   {
     "id": "1788689355366-wvdh1",
@@ -36486,7 +36816,12 @@
       0.0149,
       -0.0169
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.56640625,
+      "y": 0.53369140625
+    },
+    "aesthetic": 0.5079
   },
   {
     "id": "1788689360986-5787p",
@@ -37023,7 +37358,12 @@
       0.0224,
       -0.0126
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.58447265625,
+      "y": 0.55126953125
+    },
+    "aesthetic": 0.349
   },
   {
     "id": "1788689366505-3xx6q",
@@ -37560,7 +37900,12 @@
       0.0047,
       0.0201
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.6103515625,
+      "y": 0.515625
+    },
+    "aesthetic": 0.5961
   },
   {
     "id": "1788689372245-4fi2z",
@@ -38097,7 +38442,12 @@
       0.0329,
       0.01
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.58935546875,
+      "y": 0.5498046875
+    },
+    "aesthetic": 0.6224
   },
   {
     "id": "1788689377097-ukpw6",
@@ -38634,7 +38984,12 @@
       -0.0027,
       0.0406
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5087890625,
+      "y": 0.54833984375
+    },
+    "aesthetic": 0.6679
   },
   {
     "id": "1788689382500-u4l14",
@@ -39172,7 +39527,12 @@
       -0.0129,
       0.0407
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.3134765625,
+      "y": 0.64208984375
+    },
+    "aesthetic": 0.1544
   },
   {
     "id": "1788686239999-nhsu4",
@@ -39709,7 +40069,12 @@
       0.0247,
       -0.0092
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.395751953125,
+      "y": 0.78173828125
+    },
+    "aesthetic": 0.6585
   },
   {
     "id": "1788686244525-lgv3j",
@@ -40246,7 +40611,12 @@
       -0.0437,
       -0.0173
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.48583984375,
+      "y": 0.861328125
+    },
+    "aesthetic": 0.6785
   },
   {
     "id": "1788686249642-r05cu",
@@ -40784,7 +41154,12 @@
       -0.038,
       -0.0022
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.0874
   },
   {
     "id": "1788686253230-20tgy",
@@ -41321,7 +41696,12 @@
       0.0145,
       0.0537
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.6162109375,
+      "y": 0.6923828125
+    },
+    "aesthetic": 0.031
   },
   {
     "id": "1788686261632-wj01p",
@@ -41858,7 +42238,12 @@
       0.0648,
       0.0445
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.560546875,
+      "y": 0.60107421875
+    },
+    "aesthetic": 0.8664
   },
   {
     "id": "1788686161298-ejn7b",
@@ -42395,7 +42780,12 @@
       -0.0004,
       0.0145
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.3081
   },
   {
     "id": "1788686165490-adww8",
@@ -42932,7 +43322,12 @@
       -0.0644,
       0.0013
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.1641845703125,
+      "y": 0.9462890625
+    },
+    "aesthetic": 0.3028
   },
   {
     "id": "1788685616907-ymn7d",
@@ -43469,7 +43864,12 @@
       0.0185,
       -0.013
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.9421
   },
   {
     "id": "1788685616907-7yd9t",
@@ -44006,7 +44406,12 @@
       0.0148,
       0.0258
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.8128
   },
   {
     "id": "1788685616907-lgfbz",
@@ -44543,7 +44948,12 @@
       -0.0115,
       0.0054
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.54638671875,
+      "y": 0.583984375
+    },
+    "aesthetic": 0.541
   },
   {
     "id": "1788684998037-76izm",
@@ -45080,7 +45490,12 @@
       0.025,
       -0.0244
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.43994140625,
+      "y": 0.52685546875
+    },
+    "aesthetic": 0.3275
   },
   {
     "id": "1788685037119-kzbcn",
@@ -45616,7 +46031,12 @@
       -0.0143,
       0.0257
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.576171875,
+      "y": 0.490478515625
+    },
+    "aesthetic": 0.2048
   },
   {
     "id": "1788685057906-trd44",
@@ -46154,7 +46574,12 @@
       -0.0097,
       0.0329
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.537109375,
+      "y": 0.560546875
+    },
+    "aesthetic": 0.2515
   },
   {
     "id": "1788684710892-63dee",
@@ -46690,7 +47115,12 @@
       -0.0003,
       -0.0174
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2603
   },
   {
     "id": "1788684717572-kjqot",
@@ -47228,7 +47658,12 @@
       0.0125,
       0.0387
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.6220703125,
+      "y": 0.5859375
+    },
+    "aesthetic": 0.1794
   },
   {
     "id": "1788684530425-ktlm6",
@@ -47765,7 +48200,12 @@
       -0.024,
       0.0321
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.0203
   },
   {
     "id": "1788684530425-nzhug",
@@ -48301,7 +48741,12 @@
       -0.0077,
       -0.0102
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.21337890625,
+      "y": 0.373779296875
+    },
+    "aesthetic": 0.6753
   },
   {
     "id": "1788684530425-drs6a",
@@ -48837,7 +49282,12 @@
       0.0327,
       0.0301
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2648
   },
   {
     "id": "1788684493174-cauvz",
@@ -49374,7 +49824,12 @@
       -0.0145,
       -0.0057
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.52490234375,
+      "y": 0.5361328125
+    },
+    "aesthetic": 0.0719
   },
   {
     "id": "1788684493174-zojbz",
@@ -49910,7 +50365,12 @@
       -0.0259,
       0.0551
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5078125,
+      "y": 0.56494140625
+    },
+    "aesthetic": 0.1733
   },
   {
     "id": "1788684493174-g66aa",
@@ -50446,7 +50906,12 @@
       0.0102,
       -0.0392
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2202
   },
   {
     "id": "1788684493174-v83go",
@@ -50982,7 +51447,12 @@
       -0.0272,
       0.0711
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.44287109375,
+      "y": 0.59033203125
+    },
+    "aesthetic": 0.5306
   },
   {
     "id": "1787666816417-tuscg",
@@ -51513,7 +51983,12 @@
       -0.0086,
       -0.011
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.4881
   },
   {
     "id": "1787666285862-4hnzo",
@@ -52044,7 +52519,12 @@
       0.0251,
       0.0037
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.49951171875,
+      "y": 0.50048828125
+    },
+    "aesthetic": 0.1319
   },
   {
     "id": "1787666286556-yxjg8",
@@ -52575,7 +53055,12 @@
       0.0194,
       0.0254
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.49951171875,
+      "y": 0.50048828125
+    },
+    "aesthetic": 0.5804
   },
   {
     "id": "1787666287345-y6e07",
@@ -53106,7 +53591,12 @@
       0.0203,
       -0.0022
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.9183
   },
   {
     "id": "1787665788646-1wvu9",
@@ -53636,7 +54126,12 @@
       -0.0158,
       0.0035
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2483
   },
   {
     "id": "1787665789336-gek6n",
@@ -54166,7 +54661,12 @@
       0.0063,
       -0.0181
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.3506
   },
   {
     "id": "1787665790012-mlvwv",
@@ -54696,7 +55196,12 @@
       0.0349,
       0.002
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.51904296875,
+      "y": 0.60107421875
+    },
+    "aesthetic": 0.2809
   },
   {
     "id": "1787665790927-5i9ak",
@@ -55226,7 +55731,12 @@
       -0.0158,
       0.0035
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2483
   },
   {
     "id": "1787665791638-ukblv",
@@ -55756,7 +56266,12 @@
       0.0063,
       -0.0181
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.3506
   },
   {
     "id": "1787665792340-kl2zl",
@@ -56286,7 +56801,12 @@
       -0.0124,
       0.0428
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.63916015625,
+      "y": 0.5947265625
+    },
+    "aesthetic": 0.199
   },
   {
     "id": "1787665793038-89avt",
@@ -56816,7 +57336,12 @@
       0.0093,
       -0.0014
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2959
   },
   {
     "id": "1787665793863-gl050",
@@ -57346,7 +57871,12 @@
       0.0028,
       0.0349
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2266
   },
   {
     "id": "1787665794551-zns0v",
@@ -57876,7 +58406,12 @@
       0.0318,
       -0.0015
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.1563720703125,
+      "y": 0.50537109375
+    },
+    "aesthetic": 0.8366
   },
   {
     "id": "1787665795247-qxf7i",
@@ -58406,7 +58941,12 @@
       0.0229,
       -0.0027
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.3603515625,
+      "y": 0.50048828125
+    },
+    "aesthetic": 0.4184
   },
   {
     "id": "1787665795926-htz3w",
@@ -58936,7 +59476,12 @@
       0.0023,
       0.0095
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.3641
   },
   {
     "id": "1787665796620-c0k57",
@@ -59466,7 +60011,12 @@
       -0.0128,
       0.0252
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.2204
   },
   {
     "id": "1787665797301-nt7nc",
@@ -59996,7 +60546,12 @@
       0.0437,
       0.041
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.424072265625,
+      "y": 0.84130859375
+    },
+    "aesthetic": 0.2128
   },
   {
     "id": "1787665798015-g541u",
@@ -60526,7 +61081,12 @@
       0.031,
       -0.0271
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.52685546875,
+      "y": 0.5
+    },
+    "aesthetic": 0.6063
   },
   {
     "id": "1787665798700-0o7qz",
@@ -61056,7 +61616,12 @@
       -0.0248,
       -0.0288
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.6650390625,
+      "y": 0.49951171875
+    },
+    "aesthetic": 0.1483
   },
   {
     "id": "1787665799405-q37gn",
@@ -61586,7 +62151,12 @@
       0.0194,
       0.0254
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.49951171875,
+      "y": 0.50048828125
+    },
+    "aesthetic": 0.5804
   },
   {
     "id": "1787665800103-pjxdi",
@@ -62116,7 +62686,12 @@
       0.0203,
       -0.0022
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.9183
   },
   {
     "id": "1787665800797-t3jjx",
@@ -62646,7 +63221,12 @@
       -0.0223,
       -0.0358
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.3975
   },
   {
     "id": "1787655530104-xst70",
@@ -63176,7 +63756,12 @@
       -0.0289,
       0.02
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "aesthetic": 0.1552
   },
   {
     "id": "1787655530104-w4xpd",
@@ -63706,6 +64291,11 @@
       0.0349,
       0.002
     ],
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "focus": {
+      "x": 0.51904296875,
+      "y": 0.60107421875
+    },
+    "aesthetic": 0.2809
   }
 ]
