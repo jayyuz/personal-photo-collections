@@ -70,6 +70,9 @@ export function PhotoCard({ photo, onClick, index }: PhotoCardProps) {
             src={photo.src}
             alt={photo.title}
             className={`card__img ${loaded ? 'card__img--on' : ''}`}
+            style={photo.focus
+              ? { objectPosition: `${photo.focus.x * 100}% ${photo.focus.y * 100}%` }
+              : undefined}
             onLoad={() => setLoaded(true)}
             draggable={false}
           />

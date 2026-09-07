@@ -28,6 +28,9 @@ const isSandbox = Boolean(sandboxId);
 export default defineConfig({
   base,
   plugins: [optionalJsxSourcePlugin(), react(), checker({ typescript: false }), uploadPlugin()],
+  optimizeDeps: {
+    exclude: ['@huggingface/transformers'],
+  },
   server: {
     port: 8000,
     host: '0.0.0.0',

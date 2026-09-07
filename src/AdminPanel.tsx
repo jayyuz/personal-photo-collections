@@ -9,8 +9,11 @@
  * 配置存 localStorage，Token 不进源码。
  */
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { Photo, PhotoExif, PhotoSpan } from './data';
-import { toPhoto } from './usePhotos';
+import type { Photo, PhotoExif, PhotoFocus, PhotoSpan } from './data';
+import { toPhoto, type ApiPhoto } from './usePhotos';
+import { TINT_OPTS } from './tints';
+import { PublishedSmart, QueueSmart } from './QueueSmart';
+import { PublishedFocus, QueueFocus } from './FocusSmart';
 import { readExif, readExifFromUrl } from './exif';
 import {
   SPAN_LABEL, SPAN_OPTIONS, sizeFromFile, sizeFromExif, sizeFromSrc, spanFromSize,
@@ -22,16 +25,6 @@ import { compressImage, type Compressed } from './compress';
 /** 并发上限，避免一次把几十张图同时拉下来 */
 const PROBE_CONCURRENCY = 6;
 
-const TINT_OPTS = [
-  { label: '人物 · 暖红',  value: 'rgba(220,80,60,0.25)'    },
-  { label: '人文 · 琥珀',  value: 'rgba(200,120,20,0.22)'   },
-  { label: '花朵 · 洋红',  value: 'rgba(220,40,180,0.22)'   },
-  { label: '风景 · 靛蓝',  value: 'rgba(40,120,200,0.22)'   },
-  { label: '暮色 · 深紫',  value: 'rgba(80,40,160,0.25)'    },
-  { label: '清爽 · 翠绿',  value: 'rgba(40,160,100,0.22)'   },
-  { label: '极光 · 玫瑰',  value: 'rgba(200,40,120,0.22)'   },
-  { label: '中性 · 灰调',  value: 'rgba(180,180,180,0.22)'  },
-];
 const LS_CONFIG_KEY = 'photo-admin-config-v1';
 /** 上传上限，超过的会先在浏览器里压缩 */
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -58,11 +51,6 @@ interface FormState {
   year:     string;
   tint:     string;
 }
-interface ApiPhoto {
-  id: string; title: string; src: string; span: string;
-  location?: string; year?: number; tint: string; cover?: boolean;
-  exif?: PhotoExif;
-}
 interface PendingItem {
   localId:    string;
   title:      string;
@@ -78,6 +66,11 @@ interface PendingItem {
   shrunkFrom?: number;
   /** 手动指定的布局；undefined 表示跟随自动判定 */
   span?:      PhotoSpan;
+  tags?:      string[];
+  tint?:      string;
+  embedding?: number[];
+  focus?:     PhotoFocus;
+  aesthetic?: number;
 }
 
 /** 每张图最终采用的布局：手动覆盖优先，否则按宽高比判定 */
@@ -706,14 +699,18 @@ export function AdminPanel({
         // 已有图片没带 EXIF 时尽力从投递地址读一次，失败就留空
         const exif = item.exif ?? (item.remoteUrl ? await readExifFromUrl(src) : undefined);
         entries.push({
-          id:       newLocalId(),
-          title:    item.title.trim(),
+          id:        newLocalId(),
+          title:     item.title.trim(),
           src,
-          span:     spanOf(item),
-          location: form.location.trim() || undefined,
-          year:     Number(form.year) || undefined,
-          tint:     form.tint,
+          span:      spanOf(item),
+          location:  form.location.trim() || undefined,
+          year:      Number(form.year) || undefined,
+          tint:      item.tint ?? form.tint,
           exif,
+          tags:      item.tags,
+          embedding: item.embedding,
+          focus:     item.focus,
+          aesthetic: item.aesthetic,
         });
       }
       setStatus({ type: 'ok', msg: '同步到 GitHub…' });
@@ -1091,9 +1088,27 @@ export function AdminPanel({
           <aside className="apf__pane apf__pane--rail">
             <div className="apf__pane-head">
               <span className="apf__pane-title">待添加 {pending.length ? `· ${pending.length}` : ''}</span>
-              {pending.length > 0 && (
-                <button type="button" className="ap__lib-link" onClick={resetQueue}>清空</button>
-              )}
+              <div className="apf__pane-acts">
+                <QueueSmart
+                  items={pending}
+                  disabled={uploading}
+                  onPatch={(localId, patch) => setPending(prev =>
+                    prev.map(p => p.localId === localId ? { ...p, ...patch } : p)
+                  )}
+                  onStatus={setStatus}
+                />
+                <QueueFocus
+                  items={pending}
+                  disabled={uploading}
+                  onPatch={(localId, patch) => setPending(prev =>
+                    prev.map(p => p.localId === localId ? { ...p, ...patch } : p)
+                  )}
+                  onStatus={setStatus}
+                />
+                {pending.length > 0 && (
+                  <button type="button" className="ap__lib-link" onClick={resetQueue}>清空</button>
+                )}
+              </div>
             </div>
             <div className="apf__pane-body">
             {pending.length === 0 ? (
@@ -1102,9 +1117,21 @@ export function AdminPanel({
               <ul className="ap__queue">
                 {pending.map((item, i) => (
                   <li key={item.localId} className="ap__queue-item">
-                    <div className="ap__queue-thumb">
-                      <img src={item.preview} alt="" />
+                    <div
+                      className={`ap__queue-thumb${item.tint ? ' ap__queue-thumb--tint' : ''}`}
+                      style={item.tint ? { boxShadow: `inset 0 0 0 2px ${item.tint}` } : undefined}
+                    >
+                      <img
+                        src={item.preview}
+                        alt=""
+                        style={item.focus
+                          ? { objectPosition: `${item.focus.x * 100}% ${item.focus.y * 100}%` }
+                          : undefined}
+                      />
                       {item.remoteUrl && <span className="ap__queue-badge">链接</span>}
+                      {item.tint && (
+                        <span className="ap__queue-swatch" style={{ background: item.tint }} aria-hidden />
+                      )}
                     </div>
                     <div className="ap__queue-main">
                       <label className="ap__label ap__queue-title">
@@ -1119,6 +1146,9 @@ export function AdminPanel({
                           maxLength={40}
                         />
                       </label>
+                      {item.tags && item.tags.length > 0 && (
+                        <p className="ap__queue-tags">{item.tags.join(' · ')}</p>
+                      )}
                       <div className="ap__queue-foot">
                         <span
                           className="ap__queue-dim"
@@ -1220,6 +1250,49 @@ export function AdminPanel({
                   共 {uploadedPhotos.length} 张 · {gridCols} 列 ·
                   {gridStats.holes ? `仍有 ${gridStats.holes} 个空位` : '密铺无空洞'} · 星标为首屏背景
                 </span>
+                <PublishedSmart
+                  photos={uploadedPhotos}
+                  disabled={relayouting || !isGithubOk}
+                  onStatus={setStatus}
+                  persist={async (next, message) => {
+                    const { photos: current } = await fetchPhotosMeta(cfg);
+                    const byId = new Map(next.map(p => [p.id, p]));
+                    const merged = current.map(p => {
+                      const u = byId.get(p.id);
+                      if (!u) return p;
+                      return {
+                        ...p,
+                        tags: u.tags ?? p.tags,
+                        embedding: u.embedding ?? p.embedding,
+                      };
+                    });
+                    await savePhotosMeta(merged, cfg, message);
+                    onUpdate(next);
+                  }}
+                  onUpdate={onUpdate}
+                />
+                <PublishedFocus
+                  photos={uploadedPhotos}
+                  disabled={relayouting || !isGithubOk}
+                  onStatus={setStatus}
+                  persist={async (next, message) => {
+                    const { photos: current } = await fetchPhotosMeta(cfg);
+                    const byId = new Map(next.map(p => [p.id, p]));
+                    const merged = current.map(p => {
+                      const u = byId.get(p.id);
+                      if (!u) return p;
+                      return {
+                        ...p,
+                        focus: u.focus ?? p.focus,
+                        aesthetic: u.aesthetic != null ? u.aesthetic : p.aesthetic,
+                      };
+                    });
+                    await savePhotosMeta(merged, cfg, message);
+                    onUpdate(next);
+                  }}
+                  onUpdate={onUpdate}
+                  onSetCover={p => void handleSetCover(p)}
+                />
                 <button type="button" className="apf__mini"
                   onClick={() => void handleRelayout()}
                   disabled={relayouting || !uploadedPhotos.length}
@@ -1241,7 +1314,16 @@ export function AdminPanel({
                     const isCover = p.cover || (!uploadedPhotos.some(x => x.cover) && i === 0);
                     return (
                     <li key={p.id} className="ap__item">
-                      <div className="ap__item-thumb"><img src={p.src} alt={p.title} loading="lazy" /></div>
+                      <div className="ap__item-thumb">
+                        <img
+                          src={p.src}
+                          alt={p.title}
+                          loading="lazy"
+                          style={p.focus
+                            ? { objectPosition: `${p.focus.x * 100}% ${p.focus.y * 100}%` }
+                            : undefined}
+                        />
+                      </div>
                       <div className="ap__item-info">
                         <span className="ap__item-title">{p.title}</span>
                         <span className="ap__item-meta">

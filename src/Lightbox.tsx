@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Photo, PhotoExif } from './data';
 import { exifRows, readExifFromUrl } from './exif';
+import { similarTo } from './ml/search';
 import { cardGeometry } from './PhotoCard';
 import type { CardGeometry } from './PhotoCard';
 import type { CinemaHandle } from './vr/cinema';
@@ -23,6 +24,12 @@ function backdropUrl(src: string): string {
   return src.replace(/\/upload\/[^/]*\//, '/upload/w_120,e_blur:1200,q_30,f_auto/');
 }
 
+/** 相似那一排只有几十像素宽，没必要拉原图 */
+function thumbUrl(src: string): string {
+  if (!src.includes('res.cloudinary.com')) return src;
+  return src.replace(/\/upload\/[^/]*\//, '/upload/w_128,h_128,c_fill,q_auto,f_auto/');
+}
+
 const MAX_ZOOM = 6;
 const FIT = { s: 1, x: 0, y: 0 };
 /** 从卡片放大到全屏（以及关闭时飞回去）的时长 */
@@ -32,6 +39,8 @@ const FLIP_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
 const IMG_RADIUS = 3;
 /** 缩不回卡片时的整块淡出，要和 .lb--fade 的过渡对齐 */
 const EXIT_FADE_MS = 220;
+/** 「相似」一行最多放几张 */
+const SIMILAR_MAX = 5;
 /** 滑动超过这个距离（或屏宽的 16%）就翻页 */
 const SWIPE_MIN = 48;
 /** 单指移动超过这个距离就不算点击，免得滑一下把信息层切出来 */
@@ -448,6 +457,16 @@ export function Lightbox({
     setInfoOpen(o => !o);
   };
 
+  /* ---------- 相似推荐 ---------- */
+  // 只在当前展示的这批里找，画廊在筛选时不会推出一张点不开的图
+  const similar = useMemo(() => {
+    if (!photo?.embedding?.length) return [];
+    return similarTo(photo, photos, SIMILAR_MAX + 2)
+      .map(p => ({ photo: p, index: photos.findIndex(x => x.id === p.id) }))
+      .filter(x => x.index >= 0)
+      .slice(0, SIMILAR_MAX);
+  }, [photo, photos]);
+
   if (!photo) return null;
 
   const rows = liveExif ? exifRows(liveExif) : [];
@@ -459,6 +478,7 @@ export function Lightbox({
         'lb',
         zoomed ? 'lb--zoom' : '',
         infoOpen ? 'lb--info' : '',
+        similar.length ? 'lb--similar' : '',
         exit === 'flip' ? 'lb--closing' : '',
         exit === 'fade' ? 'lb--fade' : '',
       ].filter(Boolean).join(' ')}
@@ -553,6 +573,22 @@ export function Lightbox({
               <polyline points="9 18 15 12 9 6" />
             </svg>
           </button>
+        )}
+        {similar.length > 0 && (
+          <div className="lb__similar" aria-label="相似作品">
+            <span className="lb__similar-label" aria-hidden="true">相似</span>
+            {similar.map(({ photo: p, index }) => (
+              <button
+                key={p.id}
+                className="lb__similar-thumb"
+                onClick={() => onSelect(index)}
+                title={p.title}
+                aria-label={`查看相似作品：${p.title}`}
+              >
+                <img src={thumbUrl(p.src)} alt="" loading="lazy" draggable={false} />
+              </button>
+            ))}
+          </div>
         )}
       </div>
 

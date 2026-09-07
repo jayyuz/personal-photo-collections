@@ -14,6 +14,12 @@ export interface PhotoExif {
   shotAt?:   string;
 }
 
+/** 主体在画面中的位置，0–1，给封面和卡片做智能裁切 */
+export interface PhotoFocus {
+  x: number;
+  y: number;
+}
+
 export interface Photo {
   id: string;
   title: string;
@@ -26,6 +32,14 @@ export interface Photo {
   // 首屏背景只取其中一张
   cover?: boolean;
   exif?: PhotoExif;
+  /** 零样本标签，如 花卉 / 街拍。功能 2 写入 */
+  tags?: string[];
+  /** Chinese-CLIP 图像向量。功能 1 写入，供语义检索 */
+  embedding?: number[];
+  /** CLIPSeg 主体重心。功能 3 写入 */
+  focus?: PhotoFocus;
+  /** 0–1，越高越适合做封面。功能 3 写入 */
+  aesthetic?: number;
 }
 // 20 张图片，span 模式精心排布，配合 grid-auto-flow: dense 形成视觉节奏
 // export const PHOTOS: Photo[] = [

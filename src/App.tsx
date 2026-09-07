@@ -4,13 +4,18 @@ import type { Photo } from './data';
 import { PhotoCard } from './PhotoCard';
 import { Lightbox } from './Lightbox';
 import { AdminPanel } from './AdminPanel';
+import { GallerySearch } from './GallerySearch';
 import { packPhotos, useGridColumns } from './pack';
 
 export default function App() {
   const { photos, coverPhoto, addPhotos, removePhoto, setCover, updatePhotos } = usePhotos();
   const columns = useGridColumns();
+  // 检索没生效时 GallerySearch 回传的就是 photos 本身，用引用判断有没有在筛
+  const [searched, setSearched] = useState<Photo[] | null>(null);
+  const visible   = searched && searched !== photos ? searched : photos;
+  const filtering = visible !== photos;
   // 密铺后的展示顺序；原顺序仍留在 photos 里，作为策展顺序
-  const gallery = useMemo(() => packPhotos(photos, columns).order, [photos, columns]);
+  const gallery = useMemo(() => packPhotos(visible, columns).order, [visible, columns]);
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
   const [page,      setPage]      = useState<'gallery' | 'about'>('gallery');
   const [scrolled,  setScrolled]  = useState(false);
@@ -114,7 +119,10 @@ export default function App() {
             <section className="hero" ref={heroRef} aria-label="封面">
               {coverPhoto && (
                 <img ref={bgRef} src={coverPhoto.src}
-                  alt="" aria-hidden="true" className="hero__bg" />
+                  alt="" aria-hidden="true" className="hero__bg"
+                  style={coverPhoto.focus
+                    ? { objectPosition: `${coverPhoto.focus.x * 100}% ${coverPhoto.focus.y * 100}%` }
+                    : undefined} />
               )}
               <div className="hero__veil" />
               <div className="hero__body">
@@ -140,11 +148,17 @@ export default function App() {
               </div>
             </section>
 
+            {photos.length > 0 && (
+              <GallerySearch photos={photos} onFiltered={setSearched} />
+            )}
+
             <section className="gallery" aria-label="摄影作品">
               {photos.length === 0 ? (
                 <p className="gallery__empty">
                   还没有作品。点右下角的按钮上传，或从 Cloudinary 导入。
                 </p>
+              ) : filtering && gallery.length === 0 ? (
+                <p className="gallery__empty">没有符合的作品</p>
               ) : (
                 <div className="bento">
                   {gallery.map((photo, i) => (

@@ -4,9 +4,9 @@
  * 唯一数据源是 public/photos.json（由管理面板写入，Cloudinary URL）。
  */
 import { useState, useEffect } from 'react';
-import type { Photo, PhotoExif, PhotoSpan } from './data';
+import type { Photo, PhotoExif, PhotoFocus, PhotoSpan } from './data';
 
-interface ApiPhoto {
+export interface ApiPhoto {
   id:        string;
   title:     string;
   src:       string;
@@ -16,19 +16,36 @@ interface ApiPhoto {
   tint:      string;
   cover?:    boolean;
   exif?:     PhotoExif;
+  tags?:     string[];
+  embedding?: number[];
+  focus?:    PhotoFocus;
+  aesthetic?: number;
+}
+
+function finiteFocus(f?: PhotoFocus): PhotoFocus | undefined {
+  if (!f) return undefined;
+  if (!Number.isFinite(f.x) || !Number.isFinite(f.y)) return undefined;
+  return {
+    x: Math.min(1, Math.max(0, f.x)),
+    y: Math.min(1, Math.max(0, f.y)),
+  };
 }
 
 export function toPhoto(p: ApiPhoto): Photo {
   return {
-    id:       p.id,
-    title:    p.title,
-    src:      p.src,
-    span:     (p.span as PhotoSpan) || 'normal',
-    location: p.location || undefined,
-    year:     p.year     || undefined,
-    tint:     p.tint,
-    cover:    p.cover || undefined,
-    exif:     p.exif  || undefined,
+    id:        p.id,
+    title:     p.title,
+    src:       p.src,
+    span:      (p.span as PhotoSpan) || 'normal',
+    location:  p.location || undefined,
+    year:      p.year     || undefined,
+    tint:      p.tint,
+    cover:     p.cover || undefined,
+    exif:      p.exif  || undefined,
+    tags:      p.tags?.length ? p.tags : undefined,
+    embedding: p.embedding?.length ? p.embedding : undefined,
+    focus:     finiteFocus(p.focus),
+    aesthetic: Number.isFinite(p.aesthetic) ? p.aesthetic : undefined,
   };
 }
 
