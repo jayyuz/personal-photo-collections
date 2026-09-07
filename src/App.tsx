@@ -118,7 +118,7 @@ export default function App() {
               )}
               <div className="hero__veil" />
               <div className="hero__body">
-                <div className="hero__tag">Personal Photography · 2022–2024</div>
+                <div className="hero__tag">Personal Photography · 2022–2026</div>
                 <h1 className="hero__title">
                   <span className="hero__tl" aria-hidden="true">LIGHT</span>
                   <span className="hero__tl hero__tl--stroke" aria-hidden="true">&amp;</span>

@@ -29,7 +29,7 @@ const FIT = { s: 1, x: 0, y: 0 };
 const FLIP_MS = 380;
 const FLIP_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
 /** 大图圆角，飞行结束时要正好落在 .lb__img 的圆角上 */
-const IMG_RADIUS = 5;
+const IMG_RADIUS = 3;
 /** 缩不回卡片时的整块淡出，要和 .lb--fade 的过渡对齐 */
 const EXIT_FADE_MS = 220;
 /** 滑动超过这个距离（或屏宽的 16%）就翻页 */

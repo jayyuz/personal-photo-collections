@@ -21,9 +21,8 @@ export interface CardGeometry {
 export function cardGeometry(photoId: string): CardGeometry | null {
   const el = document.querySelector(`[data-photo-id="${CSS.escape(photoId)}"]`);
   if (!el) return null;
-  const inner = el.querySelector('.card__inner');
   const img = el.querySelector('.card__img');
-  return { frame: (inner ?? el).getBoundingClientRect(), box: (img ?? el).getBoundingClientRect() };
+  return { frame: el.getBoundingClientRect(), box: (img ?? el).getBoundingClientRect() };
 }
 
 export function PhotoCard({ photo, onClick, index }: PhotoCardProps) {
@@ -64,27 +63,25 @@ export function PhotoCard({ photo, onClick, index }: PhotoCardProps) {
       aria-label={`查看: ${photo.title}`}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
     >
-      <div className="card__inner">
-        {!loaded && <div className="card__skeleton" aria-hidden="true" />}
-        <div className="card__parallax" aria-hidden="true">
-          {visible && (
-            <img
-              src={photo.src}
-              alt={photo.title}
-              className={`card__img ${loaded ? 'card__img--on' : ''}`}
-              onLoad={() => setLoaded(true)}
-              draggable={false}
-            />
-          )}
-        </div>
-        <div className="card__info">
-          <span className="card__title">{photo.title}</span>
-          {(photo.location || photo.year) && (
-            <span className="card__meta">
-              {[photo.location, photo.year].filter(Boolean).join(' · ')}
-            </span>
-          )}
-        </div>
+      {!loaded && <div className="card__skeleton" aria-hidden="true" />}
+      <div className="card__parallax" aria-hidden="true">
+        {visible && (
+          <img
+            src={photo.src}
+            alt={photo.title}
+            className={`card__img ${loaded ? 'card__img--on' : ''}`}
+            onLoad={() => setLoaded(true)}
+            draggable={false}
+          />
+        )}
+      </div>
+      <div className="card__info">
+        <span className="card__title">{photo.title}</span>
+        {(photo.location || photo.year) && (
+          <span className="card__meta">
+            {[photo.location, photo.year].filter(Boolean).join(' · ')}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@
 :root {
   --bg:     #080808;
   --fg:     #F0F0F0;
-  --muted:  #555;
+  --muted:  #d0d0d0;
   --border: #1E1E1E;
   --nav-h:  60px;
   --f-head: 'Archivo', system-ui, sans-serif;
@@ -84,62 +84,27 @@ a       { color: inherit; text-decoration: none; }
 @keyframes arrowBob { 0%,100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(8px); } }
 
 /* Bento */
-.gallery { padding: 8px 6px 0; }
-.bento { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: var(--cell); grid-auto-flow: dense; gap: 10px; }
+.gallery { padding: 2px 0 0; }
+.bento { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: var(--cell); grid-auto-flow: dense; gap: var(--gap); }
 .gallery__empty { text-align: center; padding: 80px 20px; font-size: 0.875rem; letter-spacing: 0.04em; color: var(--muted); }
 
-/* Card — 模拟相纸装裱在深色卡纸上 */
-.card {
-  position: relative; overflow: hidden; cursor: pointer;
-  /* 卡纸底色，四边露出 3–4px 当「白边」 */
-  background: rgba(245,242,237,0.92);
-  padding: 3px;
-  /* 微妙的立体感 */
-  box-shadow:
-    0 1px 2px rgba(0,0,0,0.18),
-    0 4px 12px rgba(0,0,0,0.12),
-    0 12px 36px rgba(0,0,0,0.08);
-  /* 相纸边缘极轻的圆角 */
-  border-radius: 2px;
-  opacity: 0; transform: scale(0.97) translateY(6px);
-  transition:
-    opacity 0.5s var(--ease-out) var(--delay, 0ms),
-    transform 0.5s var(--ease-out) var(--delay, 0ms),
-    box-shadow 0.35s var(--ease-out);
-}
-.card--visible { opacity: 1; transform: scale(1) translateY(0); }
-/* hover 时整张「相片」微微浮起 */
-.card:hover {
-  box-shadow:
-    0 2px 4px rgba(0,0,0,0.22),
-    0 8px 24px rgba(0,0,0,0.18),
-    0 24px 56px rgba(0,0,0,0.14);
-}
+/* Card */
+.card { position: relative; overflow: hidden; cursor: pointer; background: #0f0f0f; opacity: 0; transform: scale(0.97); transition: opacity 0.5s var(--ease-out) var(--delay, 0ms), transform 0.5s var(--ease-out) var(--delay, 0ms); }
+.card--visible { opacity: 1; transform: scale(1); }
 .card--wide { grid-column: span 2; }
 .card--tall { grid-row:    span 2; }
 .card--big  { grid-column: span 2; grid-row: span 2; }
-
-/* 图片区域的内容容器，裁掉卡纸白边以内的溢出 */
-.card__inner { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 1px; }
-
-.card__skeleton { position: absolute; inset: 0; z-index: 0; background: linear-gradient(110deg, #e8e4de 30%, #f0ece6 50%, #e8e4de 70%); background-size: 200% 100%; animation: sk 1.6s linear infinite; }
+.card__skeleton { position: absolute; inset: 0; z-index: 0; background: linear-gradient(110deg, #111 30%, #191919 50%, #111 70%); background-size: 200% 100%; animation: sk 1.6s linear infinite; }
 @keyframes sk { to { background-position: -200% 0; } }
 .card__parallax { position: absolute; top: -8%; left: 0; right: 0; bottom: -8%; }
 .card__img { width: 100%; height: 100%; object-fit: cover; opacity: 0; filter: blur(10px); transform: scale(1.04); transition: opacity 0.45s ease, filter 0.55s ease, transform 0.7s var(--ease-out); }
 .card__img--on { opacity: 1; filter: none; transform: scale(1); }
 .card:hover .card__img--on { transform: scale(1.03); }
-
-/* 模拟相纸内框的极淡暗角 — 照片冲印出来都会有一点 */
-.card__inner::after {
-  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  box-shadow: inset 0 0 20px rgba(0,0,0,0.06), inset 0 0 3px rgba(0,0,0,0.04);
-}
-
-.card__info { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; justify-content: flex-end; padding: 14px 14px 12px; background: linear-gradient(to top, rgba(0,0,0,0.36) 0%, rgba(0,0,0,0.10) 38%, transparent 58%); clip-path: inset(100% 0 0 0); transition: clip-path 0.38s var(--ease-out); pointer-events: none; }
+.card__info { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; justify-content: flex-end; padding: 14px 14px 12px; background: linear-gradient(to top, rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.08) 38%, transparent 58%); clip-path: inset(100% 0 0 0); transition: clip-path 0.38s var(--ease-out); pointer-events: none; }
 .card:hover .card__info { clip-path: inset(0% 0 0 0); }
-.card__title { font-family: var(--f-head); font-size: 0.9375rem; font-weight: 600; letter-spacing: 0.04em; color: #FFF; line-height: 1.2; text-shadow: 0 1px 4px rgba(0,0,0,0.4); }
-.card__meta { font-size: 0.6875rem; font-weight: 400; letter-spacing: 0.1em; color: rgba(255,255,255,0.55); margin-top: 4px; text-shadow: 0 1px 3px rgba(0,0,0,0.3); }
-.card:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; z-index: 3; }
+.card__title { font-family: var(--f-head); font-size: 0.9375rem; font-weight: 600; letter-spacing: 0.04em; color: #FFF; line-height: 1.2; }
+.card__meta { font-size: 0.6875rem; font-weight: 400; letter-spacing: 0.1em; color: rgba(255,255,255,0.5); margin-top: 4px; }
+.card:focus-visible { outline: 2px solid var(--fg); outline-offset: -2px; z-index: 3; }
 
 /* CSS Scroll Timeline */
 @supports (animation-timeline: view()) {
@@ -186,15 +151,28 @@ a       { color: inherit; text-decoration: none; }
 .lb__close:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
 .lb__stage { width: 100%; display: flex; align-items: center; justify-content: center; max-height: 88dvh; position: relative; }
 .lb__placeholder { width: 480px; height: 600px; max-width: 100%; max-height: 80dvh; border-radius: 5px; background: rgba(255,255,255,0.05); animation: sk 1.6s linear infinite; }
-/* 相纸质感：外扩的 box-shadow 当卡纸边，不占布局所以缩放平移的边界计算不受影响 */
-.lb__img { max-width: calc(100% - 20px); max-height: calc(88dvh - 20px); object-fit: contain; opacity: 0; cursor: pointer; border-radius: 5px; will-change: transform; user-select: none; -webkit-user-drag: none; transition: opacity 0.5s var(--ease-out), transform 0.22s var(--ease-out), box-shadow 0.3s var(--ease-out); box-shadow:
-  0 0 0 1px rgba(0,0,0,0.22),
-  0 0 0 10px rgba(249,247,243,0.93),
-  0 18px 40px rgba(0,0,0,0.45),
-  0 40px 90px rgba(0,0,0,0.5); }
+/* 画廊装裱效果：mat（卡纸衬板）+ 木质画框 + 墙面投影，全用 box-shadow 不占布局 */
+.lb__img { max-width: calc(100% - 20px); max-height: calc(88dvh - 20px); object-fit: contain; opacity: 0; cursor: pointer; border-radius: 3px; will-change: transform; user-select: none; -webkit-user-drag: none; transition: opacity 0.5s var(--ease-out), transform 0.22s var(--ease-out), box-shadow 0.3s var(--ease-out); box-shadow:
+  /* ① 照片边缘 — 极细暗线，模拟冲印裁切边 */
+  0 0 0 1px rgba(0,0,0,0.12),
+  /* ② Mat / 卡纸衬板 — 渐变感通过两层不同色温叠出 */
+  0 0 0 3px rgba(252,250,246,0.98),
+  0 0 0 12px rgba(246,242,235,0.97),
+  /* ③ Mat 外沿暗线 — 衬板被画框压住的那条缝 */
+  0 0 0 12.5px rgba(180,172,158,0.35),
+  /* ④ 画框主体 — 深木色，多层模拟框的厚度和侧面高光 */
+  0 0 0 14px rgba(58,48,38,0.88),
+  0 0 0 16px rgba(72,60,48,0.82),
+  0 0 0 17px rgba(92,78,62,0.45),
+  /* ⑤ 画框外缘高光 — 框的倒角处接住环境光 */
+  0 0 0 17.5px rgba(140,125,105,0.18),
+  /* ⑥ 墙面投影 — 三层递进，近处清晰远处散开 */
+  0 2px 6px 17px rgba(0,0,0,0.10),
+  0 12px 32px rgba(0,0,0,0.30),
+  0 36px 80px rgba(0,0,0,0.22); }
 .lb__img--on { opacity: 1; }
-/* 放大是为了看细节，这时候撤掉卡纸和圆角，免得跟着放大后抢视线 */
-.lb__img--zoomed { cursor: grab; border-radius: 0; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+/* 放大是为了看细节，这时候撤掉画框和圆角，免得跟着放大后抢视线 */
+.lb__img--zoomed { cursor: grab; border-radius: 0; box-shadow: 0 20px 50px rgba(0,0,0,0.45); }
 /* 手势进行中去掉 transform 过渡，不然画面会跟不上手指 */
 .lb__img--live { cursor: grabbing; transition: opacity 0.5s var(--ease-out); }
 /* 从卡片飞过来的这段时间画面还是「卡片里那一格」，卡纸边等落位了再淡进来。
@@ -222,9 +200,15 @@ a       { color: inherit; text-decoration: none; }
   .lb__view { padding: 64px 12px 84px; }
   .lb__stage { max-height: 100%; }
   .lb__img { max-width: calc(100% - 14px); max-height: calc(100% - 14px); box-shadow:
-    0 0 0 1px rgba(0,0,0,0.22),
-    0 0 0 7px rgba(249,247,243,0.93),
-    0 14px 32px rgba(0,0,0,0.45); }
+    0 0 0 1px rgba(0,0,0,0.12),
+    0 0 0 2px rgba(252,250,246,0.98),
+    0 0 0 8px rgba(246,242,235,0.97),
+    0 0 0 8.5px rgba(180,172,158,0.3),
+    0 0 0 10px rgba(58,48,38,0.85),
+    0 0 0 11.5px rgba(72,60,48,0.78),
+    0 0 0 12px rgba(92,78,62,0.35),
+    0 2px 4px 12px rgba(0,0,0,0.08),
+    0 10px 28px rgba(0,0,0,0.30); }
   /* 手机上翻页按钮挪到底部中间，不再盖在画面上 */
   .lb__nav { top: auto; bottom: 22px; transform: none; padding: 13px; background: rgba(10,10,10,0.45); transition: color 0.2s, background 0.2s, opacity 0.2s; }
   .lb__nav--prev { left: calc(50% - 58px); }
@@ -264,7 +248,7 @@ a       { color: inherit; text-decoration: none; }
 @media (max-width: 1200px) { .bento { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 900px) {
   .nav__links { display: none; } .nav__burger { display: flex; }
-  .bento { grid-template-columns: repeat(2, 1fr); --cell: 240px; gap: 8px; }
+  .bento { grid-template-columns: repeat(2, 1fr); --cell: 240px; }
   .hero__body { padding: 0 24px 52px; } .hero__count { right: 24px; }
   .about__split { grid-template-columns: 1fr; gap: 40px; padding: 56px 24px; }
   .about__visual { position: relative; top: 0; } .about__photo { aspect-ratio: 4/3; }
@@ -272,17 +256,15 @@ a       { color: inherit; text-decoration: none; }
 }
 @media (max-width: 600px) {
   :root { --cell: 180px; }
-  .bento { grid-template-columns: repeat(2, 1fr); gap: 6px; }
-  .card { padding: 2px; border-radius: 1px; }
+  .bento { grid-template-columns: repeat(2, 1fr); gap: 2px; }
   .card--big { grid-column: span 2; }
-  .gallery { padding: 4px 4px 0; }
   .hero__tl { font-size: clamp(3.5rem, 18vw, 6rem); }
   .nav__inner { padding: 0 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
-  .card { opacity: 1; transform: none; transition: box-shadow 0s !important; }
+  .card { opacity: 1; transform: none; }
   .card__img, .card__img--on { filter: none !important; transform: none !important; }
   .hero__tl { animation: none; opacity: 1; transform: none; }
   .card__parallax { animation: none !important; transform: none !important; }
