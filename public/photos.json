@@ -528,8 +528,7 @@
       "y": 0.449462890625
     },
     "aesthetic": 0.4964,
-    "embedModel": "mobileclip_s2",
-    "cover": true
+    "embedModel": "mobileclip_s2"
   },
   {
     "id": "1788773472216-txts9",
@@ -43869,7 +43868,8 @@
       "x": 0.5,
       "y": 0.5
     },
-    "aesthetic": 0.9421
+    "aesthetic": 0.9421,
+    "cover": true
   },
   {
     "id": "1788685616907-7yd9t",
