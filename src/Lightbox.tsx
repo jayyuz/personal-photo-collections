@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Photo, PhotoExif } from './data';
 import { exifRows, readExifFromUrl } from './exif';
+import { cardGeometry } from './PhotoCard';
+import type { CardGeometry } from './PhotoCard';
 import type { CinemaHandle } from './vr/cinema';
 
 interface LightboxProps {
@@ -23,12 +25,25 @@ function backdropUrl(src: string): string {
 
 const MAX_ZOOM = 6;
 const FIT = { s: 1, x: 0, y: 0 };
+/** 从卡片放大到全屏（以及关闭时飞回去）的时长 */
+const FLIP_MS = 380;
+const FLIP_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
+/** 大图圆角，飞行结束时要正好落在 .lb__img 的圆角上 */
+const IMG_RADIUS = 5;
+/** 缩不回卡片时的整块淡出，要和 .lb--fade 的过渡对齐 */
+const EXIT_FADE_MS = 220;
 /** 滑动超过这个距离（或屏宽的 16%）就翻页 */
 const SWIPE_MIN = 48;
 /** 单指移动超过这个距离就不算点击，免得滑一下把信息层切出来 */
 const TAP_SLOP = 6;
 
 interface View { s: number; x: number; y: number }
+
+const reduceMotion = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+const onScreen = (r: DOMRect) =>
+  r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth;
 
 interface Gesture {
   mode: 'idle' | 'pan' | 'pinch' | 'swipe';
@@ -53,11 +68,18 @@ export function Lightbox({
   const [view, setView] = useState<View>(FIT);
   const [gesturing, setGesturing] = useState(false);
   const [swipe, setSwipe] = useState(0);
+  const [flipping, setFlipping] = useState(false);
+  /** 退场方式：缩回卡片，或者找不到卡片时整块淡出 */
+  const [exit, setExit] = useState<'flip' | 'fade' | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureRef = useRef<Gesture | null>(null);
   const movedRef = useRef(0);
+  const flipRef = useRef<Animation | null>(null);
+  const exitTimerRef = useRef(0);
+  const openedRef = useRef(false);
+  const pendingFlipRef = useRef<{ geo: CardGeometry; at: number } | null>(null);
   // 手势过程中要读最新 view，用 ref 镜像一份，免得闭包拿到旧值
   const viewRefState = useRef<View>(view);
 
@@ -126,19 +148,128 @@ export function Lightbox({
     return () => { cancelled = true; };
   }, [photo?.id, photo?.src, photo?.exif]);
 
+  /* ---------- 从卡片放大 / 缩回卡片 ---------- */
+
+  /**
+   * 让大图在「卡片里那一格」和「铺开后的位置」之间飞一趟。
+   * 卡片里的图是 cover 裁切的：先把它在卡片里铺开的真实大小算出来当起点缩放（等比，不然画面会变形），
+   * 再用 clip-path 把可视范围裁成卡片那个窗口，起点看上去就跟卡片里的画面严丝合缝。
+   */
+  const runFlip = useCallback((geo: CardGeometry, dir: 'in' | 'out', done?: () => void) => {
+    const img = imgRef.current;
+    const w = img?.offsetWidth  ?? 0;
+    const h = img?.offsetHeight ?? 0;
+    if (!img || !w || !h || typeof img.animate !== 'function') { done?.(); return; }
+
+    // getBoundingClientRect 拿到的是带 transform 的，反推出没有 transform 时的中心
+    const box = img.getBoundingClientRect();
+    const v = viewRefState.current;
+    const cx = box.left + box.width  / 2 - v.x;
+    const cy = box.top  + box.height / 2 - v.y;
+
+    // cover：画面等比放大到刚好盖住卡片那个盒子，两边总有一个方向要溢出
+    const cw = Math.max(geo.box.width, geo.box.height * (w / h));
+    const ch = cw * (h / w);
+    const s  = cw / w;
+    const bx = geo.box.left + geo.box.width  / 2;
+    const by = geo.box.top  + geo.box.height / 2;
+    // 卡片窗口换算回图片自身的坐标系，就是起点该裁掉多少
+    const l = (geo.frame.left - (bx - cw / 2)) / s;
+    const t = (geo.frame.top  - (by - ch / 2)) / s;
+    const crop = [
+      Math.max(0, t),
+      Math.max(0, w - l - geo.frame.width  / s),
+      Math.max(0, h - t - geo.frame.height / s),
+      Math.max(0, l),
+    ].map(n => `${n}px`).join(' ');
+    const atCard: Keyframe = {
+      transform: `translate3d(${bx - cx}px, ${by - cy}px, 0) scale(${s})`,
+      clipPath: `inset(${crop} round 0px)`,
+      opacity: 1,
+    };
+    const atFull: Keyframe = {
+      transform: 'translate3d(0px, 0px, 0) scale(1)',
+      clipPath: `inset(0px 0px 0px 0px round ${IMG_RADIUS}px)`,
+      opacity: 1,
+    };
+
+    flipRef.current?.cancel();
+    const anim = img.animate(dir === 'in' ? [atCard, atFull] : [atFull, atCard], {
+      duration: FLIP_MS,
+      easing: FLIP_EASE,
+      // 飞回卡片时要停在终点等着卸载，不然会闪回全屏一帧
+      fill: dir === 'out' ? 'forwards' : 'none',
+    });
+    flipRef.current = anim;
+    setFlipping(true);
+    // 缩回卡片那一趟要一直停在终点，所以只有飞入结束才把飞行状态摘掉
+    const settle = () => { if (dir === 'in') setFlipping(false); };
+    anim.addEventListener('finish', () => { settle(); done?.(); });
+    anim.addEventListener('cancel', settle);
+  }, []);
+
+  // photo 从空变成有值才算一次「打开」，同一次打开里左右翻页不再飞
+  useEffect(() => {
+    if (!photo) {
+      openedRef.current = false;
+      pendingFlipRef.current = null;
+      flipRef.current = null;
+      window.clearTimeout(exitTimerRef.current);
+      setFlipping(false);
+      setExit(null);
+      return;
+    }
+    if (openedRef.current) return;
+    openedRef.current = true;
+    const geo = reduceMotion() ? null : cardGeometry(photo.id);
+    pendingFlipRef.current = geo ? { geo, at: performance.now() } : null;
+    // 缓存里的图有可能不再触发 onLoad，自己问一声
+    if (imgRef.current?.complete) setLoaded(true);
+  }, [photo]);
+
+  // 要等图片有尺寸了才能算终点，所以放在 loaded 之后
+  useEffect(() => {
+    if (!loaded) return;
+    const p = pendingFlipRef.current;
+    pendingFlipRef.current = null;
+    // 图没缓存、加载等了半天才好的话就别飞了，那会儿飞反而显得莫名其妙
+    if (!p || performance.now() - p.at > 500) return;
+    runFlip(p.geo, 'in');
+  }, [loaded, runFlip]);
+
+  /** 关闭时先缩回原来的卡片，动画放完再真的卸载 */
+  const requestClose = useCallback(() => {
+    if (exit) return;
+    if (!photo || reduceMotion()) { onClose(); return; }
+    // 放大看细节时缩回去没什么意义；卡片被滑出可视区（比如在 VR 里翻了很多张）也没地方可缩
+    const geo = viewRefState.current.s === 1 ? cardGeometry(photo.id) : null;
+    if (geo && onScreen(geo.frame)) {
+      setExit('flip');
+      runFlip(geo, 'out', onClose);
+      return;
+    }
+    setExit('fade');
+    exitTimerRef.current = window.setTimeout(onClose, EXIT_FADE_MS);
+  }, [exit, photo, onClose, runFlip]);
+
+  useEffect(() => () => {
+    flipRef.current?.cancel();
+    window.clearTimeout(exitTimerRef.current);
+  }, []);
+
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       if (!photo) return;
       if (e.key === 'Escape') {
         if (view.s > 1) setView(FIT);
-        else onClose();
+        else requestClose();
       }
       if (e.key === 'ArrowLeft' && hasPrev) onPrev();
       if (e.key === 'ArrowRight' && hasNext) onNext();
     };
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
-  }, [photo, onClose, onPrev, onNext, hasPrev, hasNext, view.s]);
+  }, [photo, requestClose, onPrev, onNext, hasPrev, hasNext, view.s]);
 
   useEffect(() => {
     document.body.style.overflow = photo ? 'hidden' : '';
@@ -201,6 +332,8 @@ export function Lightbox({
   const onPointerDown = (e: React.PointerEvent) => {
     // 按钮上的按下交给按钮自己处理
     if (e.target instanceof Element && e.target.closest('button')) return;
+    // 放大动画还没放完就上手了，让手势接管，免得动画结束时画面跳一下
+    if (!exit) { flipRef.current?.cancel(); flipRef.current = null; }
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const pts = [...pointersRef.current.values()];
     const base = viewRefState.current;
@@ -322,8 +455,13 @@ export function Lightbox({
 
   return (
     <div
-      className={['lb', zoomed ? 'lb--zoom' : '', infoOpen ? 'lb--info' : '']
-        .filter(Boolean).join(' ')}
+      className={[
+        'lb',
+        zoomed ? 'lb--zoom' : '',
+        infoOpen ? 'lb--info' : '',
+        exit === 'flip' ? 'lb--closing' : '',
+        exit === 'fade' ? 'lb--fade' : '',
+      ].filter(Boolean).join(' ')}
       role="dialog"
       aria-modal="true"
       aria-label={photo.title}
@@ -341,10 +479,10 @@ export function Lightbox({
         onPointerCancel={endGesture}
         onClick={(e) => {
           // 滑动过就别顺手关掉，movedRef 在 pointerup 时已经写好
-          if (e.target === e.currentTarget && movedRef.current <= TAP_SLOP) onClose();
+          if (e.target === e.currentTarget && movedRef.current <= TAP_SLOP) requestClose();
         }}
       >
-        <button className="lb__close" onClick={onClose} aria-label="关闭">
+        <button className="lb__close" onClick={requestClose} aria-label="关闭">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -385,6 +523,7 @@ export function Lightbox({
               loaded ? 'lb__img--on' : '',
               zoomed ? 'lb__img--zoomed' : '',
               gesturing ? 'lb__img--live' : '',
+              flipping ? 'lb__img--flip' : '',
             ].filter(Boolean).join(' ')}
             style={{
               transform:
