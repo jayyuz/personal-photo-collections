@@ -528,7 +528,11 @@
       "y": 0.449462890625
     },
     "aesthetic": 0.4964,
-    "embedModel": "mobileclip_s2"
+    "embedModel": "mobileclip_s2",
+    "exif": {
+      "width": 1600,
+      "height": 2400
+    }
   },
   {
     "id": "1788773472216-txts9",
@@ -1060,7 +1064,11 @@
       "x": 0.5,
       "y": 0.51220703125
     },
-    "aesthetic": 0.2994
+    "aesthetic": 0.2994,
+    "exif": {
+      "width": 1600,
+      "height": 2400
+    }
   },
   {
     "id": "1788743221022-q1rad",
@@ -1608,7 +1616,7 @@
     "id": "1788718854637-ak3z8",
     "title": "IMG 20241215 074306",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718854/photography/h5f4n1e7ouupqrycyo4s.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -2150,7 +2158,7 @@
     "id": "1788718871236-xptxl",
     "title": "IMG 20241215 074511",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718870/photography/r46rj7zvgflkexztdj50.webp",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -2692,7 +2700,7 @@
     "id": "1788718878578-soysk",
     "title": "IMG 20241007 015543",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718877/photography/hftmdbtwkqe9lfalwwko.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -3234,7 +3242,7 @@
     "id": "1788718886638-b0vai",
     "title": "IMG 20241222 211927",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718885/photography/qusv5gufpol5lylan0zs.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -3777,7 +3785,7 @@
     "id": "1788718903883-lkfry",
     "title": "IMG 20241222 212726",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718902/photography/x2pwcxn53y0lepxsklwm.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -4320,7 +4328,7 @@
     "id": "1788718905364-dq9cy",
     "title": "IMG 20241222 215153",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718904/photography/t0au8jcanlzxq2cty7kt.webp",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -4862,7 +4870,7 @@
     "id": "1788718924546-eysbf",
     "title": "IMG 20241223 081950",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718923/photography/u8q6ylpgffjig2oaccq8.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -6487,7 +6495,7 @@
     "id": "1788718430695-whrdb",
     "title": "DSC 5545",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718430/photography/owdaxsqkh7my4obizywk.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -7031,7 +7039,7 @@
     "id": "1788718437715-lwmsn",
     "title": "DSC 5110",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718436/photography/bxh9scifjksiohr0xmjt.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -7573,7 +7581,7 @@
     "id": "1788718444699-gt4x3",
     "title": "DSC 5345",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718443/photography/mj4gbkytuz4curfomeuw.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -8116,7 +8124,7 @@
     "id": "1788718449670-i0aai",
     "title": "DSC 5503",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718449/photography/fe9ru7hvbsizt2w9lirw.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -8659,7 +8667,7 @@
     "id": "1788718454363-ahowt",
     "title": "DSC 4806",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718453/photography/czxhz1f1vhgqbreh7vsy.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -9202,7 +9210,7 @@
     "id": "1788718461067-c45q0",
     "title": "DSC 4882",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718460/photography/prnrorvtioif5ujigol0.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -9744,7 +9752,7 @@
     "id": "1788718467700-wb5jh",
     "title": "DSC 9003",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718467/photography/swmunp01raqv0je8nlen.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -10287,7 +10295,7 @@
     "id": "1788718470328-03tcf",
     "title": "DSC 8697",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718468/photography/idrnsp0weuoicrr8gvsg.webp",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -10829,7 +10837,7 @@
     "id": "1788718476446-skia5",
     "title": "DSC 9424",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718475/photography/vtgilbf0hpn66g1c3awh.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -12996,7 +13004,7 @@
     "id": "1788718509214-p0ie5",
     "title": "DSC 8847",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718508/photography/mipel6cnwqtzccwfh0a9.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -13538,7 +13546,7 @@
     "id": "1788718514031-zy7lo",
     "title": "DSC 8852",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718513/photography/ujpbzgndoj5lhoyw7pa4.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -14080,7 +14088,7 @@
     "id": "1788718539929-1l8s4",
     "title": "DSC 8853",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718539/photography/assoopraoitsyiihdfwg.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -14622,7 +14630,7 @@
     "id": "1788718545456-iewh3",
     "title": "DSC 8729",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718544/photography/pgwtqdrgkl81apzczp96.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -15164,7 +15172,7 @@
     "id": "1788718570698-5lo4b",
     "title": "DSC 8734",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718570/photography/qwknsbqwxfwpq20wa1l5.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -15706,7 +15714,7 @@
     "id": "1788718586931-62n54",
     "title": "DSC 8721",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788718586/photography/huy9aiyvufmnyzj5n7wz.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -17876,7 +17884,7 @@
     "id": "1788691939847-e4zmc",
     "title": "DSC 2163",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788691939/photography/kj0ogx2x1hvz057nyuva.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -19504,7 +19512,7 @@
     "id": "1788691950930-hutp1",
     "title": "IMG 20250114 222620",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788691950/photography/ieyxith1e6zn5nmqwrca.webp",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -35742,7 +35750,7 @@
     "id": "1788689349838-0fov6",
     "title": "DSC 0366",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788689349/photography/ncraxvyf0gicqaouf8ej.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -36284,7 +36292,7 @@
     "id": "1788689355366-wvdh1",
     "title": "DSC 0409",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788689354/photography/mnkp04ujdlb7ypclbsja.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -36826,7 +36834,7 @@
     "id": "1788689360986-5787p",
     "title": "DSC 0419",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788689360/photography/pozeuafwmo4igiguhlbv.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -37910,7 +37918,7 @@
     "id": "1788689372245-4fi2z",
     "title": "DSC 0504",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788689371/photography/eahgu7uan4zkca55syxc.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -38452,7 +38460,7 @@
     "id": "1788689377097-ukpw6",
     "title": "DSC 0662",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788689376/photography/hffwqwhxfhjrmrusjni9.jpg",
-    "span": "wide",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
@@ -38994,7 +39002,7 @@
     "id": "1788689382500-u4l14",
     "title": "DSC 0757",
     "src": "https://res.cloudinary.com/l61tvfpf/image/upload/f_auto,q_auto,w_1600/v1788689381/photography/xtuxfh3ngboryqutofgd.jpg",
-    "span": "tall",
+    "span": "normal",
     "year": 2026,
     "tint": "rgba(220,80,60,0.25)",
     "exif": {
