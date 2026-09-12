@@ -14,7 +14,7 @@
  */
 import * as THREE from 'three';
 import { createPicker, type PickerHandle } from './picker';
-import { cloudinaryFit, MAX_CLOUDINARY_SIDE } from './source';
+import { cloudinaryFit, cloudinaryOriginal, MAX_CLOUDINARY_SIDE } from './source';
 import {
   createSettingsPanel, loadSettings, saveSettings,
   type SettingsHandle, type VrSettings,
@@ -37,6 +37,10 @@ export interface CinemaHandle {
   stop: () => void;
 }
 
+/** 地板平面的高度，以及它在观众这一侧的边缘 z（跟放映厅的地面保持一致） */
+const FLOOR_Y       = 0.001;
+const FLOOR_NEAR_Z  = 9;      // 地板从 z=-9 开始，见下面的 room / floor
+
 /** 尺寸和手感都放这儿，方便按 Pico 上的实际观感微调（单位：米） */
 const CFG = {
   room:      { w: 26, h: 9,  d: 34 },
@@ -45,9 +49,26 @@ const CFG = {
   photo:     { maxW: 9.0, maxH: 4.9 },
   zoomMax:   6,
   zoomSpeed: 1.5,
-  hud:       { w: 7.2, y: 0.15, z: -9.4, tilt: -0.12 },
+  // 关键：信息条必须整个在地板「远端边缘」之上，否则下半截会被地板挡掉。
+  // 地板从 z=-9 开始，所以在 z=-8.5 放一条 2.6m 高的条子，下缘必然埋进地里。
+  // 解法是把它挪到观众近处（3.5m）：同样的角度只需 1/3 的物理尺寸，
+  // 既完全避开地板，每行的像素数反而更多（字更清楚）。像影院字幕一样。
+  // 位置说明：地板从 z=-9 开始，它在屏幕上是一条斜线，条子下缘落下去就会被
+  // 地板挡掉（之前「照片」「请图」两行就是这么没的）。
+  // 所以高度不写死，由下面的自动抬升按几何关系算出来，改画布尺寸也不会再被切。
+  hud:       {
+    w: 5.6,
+    /** 期望高度，自动抬升只会把它往上抬，不会往下压 */
+    y: 0.45,
+    z: -6,
+    tilt: -0.12,
+    /** 内容实际画到画布高度的百分之多少（下方留白不算） */
+    contentBottom: 0.8,
+    /** 抬到地板边缘之上后，再多留的安全余量（米） */
+    clearance: 0.1,
+  },
   exitHoldMs: 900,
-  /** 长按摇杆多久算「打开设置」而不是「复位」 */
+  /** 长按 X 键多久算「打开设置」而不是「上一张」 */
   menuHoldMs: 600,
   /** 设置面板：摆在视线下方，调的时候银幕还看得见 */
   settings:  { width: 1.6, dist: 1.9, dropY: -0.5, tilt: 0.34 },
@@ -86,15 +107,26 @@ function nativeScaleOf(session: XRSession): number {
     const layer = XRWebGLLayer as unknown as {
       nativeFramebufferScaleFactor?: number;
       getNativeFramebufferScaleFactor?: (s: XRSession) => number;
-    };
-    const raw = layer.getNativeFramebufferScaleFactor?.(session)
-      ?? layer.nativeFramebufferScaleFactor;
+    } | undefined;
+    // 静态方法在部分运行时没有实现，调用会抛 —— 必须包在 try 里
+    const raw = layer?.getNativeFramebufferScaleFactor?.(session)
+      ?? layer?.nativeFramebufferScaleFactor;
     const v = Number(raw);
     return Number.isFinite(v) && v > 0 ? v : 1;
   } catch {
     return 1;
   }
 }
+
+/**
+ * 开 / 关设置面板的按键。xr-standard 的映射：
+ *   0 扳机 · 1 侧键(grip) · 3 摇杆 · 4 A/X · 5 B/Y
+ * 用 X(4)：它在 Pico 上必定上报（A/B 翻页一直是好的），
+ * 而摇杆按下(3)各家实现差异大，长按经常丢事件。
+ * 若 X 在你的设备上也不合适，打开面板看底部「按键」行，
+ * 按下你想要的键，把读到的索引填到这里即可。
+ */
+const MENU_BUTTON = 4;
 
 export async function isVrAvailable(): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.xr) return false;
@@ -105,7 +137,20 @@ export async function isVrAvailable(): Promise<boolean> {
   }
 }
 
-/** 摇杆在 xr-standard 里是 axes[2]/[3]，老设备只有触摸板 axes[0]/[1] */
+/**
+ * Pico 浏览器有时只给 value（模拟量）不给 pressed，或者两者都给得很保守，
+ * 所以两种都认。返回 false 就说明这个键压根没上报。
+ */
+function isDown(b: GamepadButton | undefined): boolean {
+  if (!b) return false;
+  return b.pressed === true || (typeof b.value === 'number' && b.value > 0.5);
+}
+
+/**
+ * 摇杆在 xr-standard 里是 axes[2]/[3]，老设备只有触摸板 axes[0]/[1]。
+ * 但有些设备（含部分 Pico 机型）并不是这样映射的，所以把实际值暴露出去，
+ * 好在头显里直接看出该用哪两个下标。
+ */
 function stickAxes(gp: Gamepad): { x: number; y: number } {
   const a = gp.axes;
   if (a.length >= 4) return { x: a[2] ?? 0, y: a[3] ?? 0 };
@@ -142,11 +187,86 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   if (urlScale !== null) settings.renderScale = urlScale;
   if (params.get('vrLayers') === '0') settings.useLayers = false;
 
-  // layers 这个 feature 必须在建会话时就申请，否则中途在面板里打开也用不了。
-  // 申请到只是「可用」，真正用不用由 settings.useLayers 决定。
-  const session = await navigator.xr!.requestSession('immersive-vr', {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
-  });
+  /*
+   * 是否申请 layers feature。
+   *
+   * 关键：不只是「用不用」，而是**根本别申请**。
+   * three 的判断是 `XRWebGLBinding.prototype.createProjectionLayer 存在 &&
+   * session.renderState.layers 已被填充`；只要申请过 layers，运行时可能填了
+   * renderState.layers 却又没法真正建投影层，于是 three 走进 projection 分支，
+   * 内部 getBinding() 拿到 null 就抛 —— 就是那个 "reading getBinding"。
+   * 不申请，renderState.layers 保持空，three 就走 XRWebGLLayer 老路，稳。
+   * 代价只是用不了原生合成层，而 Pico 本来也不支持。
+   */
+  const requestLayers = settings.useLayers;
+  /** 实际申请成功的特性组合，显示在诊断里，方便定位是哪个特性惹的祸 */
+  let sessionFeatures = '';
+
+  /*
+   * 还有一个更隐蔽的坑：three 里
+   *   const supportsLayers = supportsGlBinding &&
+   *     'createProjectionLayer' in XRWebGLBinding.prototype &&
+   *     session.renderState.layers !== undefined;
+   * 它**不检查 layers 是不是真的申请过**。只要运行时把 renderState.layers
+   * 初始化成空数组（有些实现会这么做），three 就走 projection 分支，
+   * 内部 getBinding() 拿到 null —— 就是那个 "reading getBinding"。
+   * 所以一旦开了「强制缓冲」（自己传 XRWebGLLayer），必须同时申请 layers，
+   * 否则 three 会把我们传的层丢掉、再自己去建投影层，然后崩。
+   */
+  const needLayersFeature = requestLayers || settings.forceWidth > 0;
+  // 会话请求失败要能看到原因，否则界面上就是「点了没反应」。
+  /*
+   * 逐级降级地请求会话。
+   * 有些运行时会因为某个 optionalFeature 直接拒绝整个请求（手追尤其常见），
+   * 而报错还不一定传到页面。所以从全量开始，失败就逐项往下减，
+   * 至少保证能用最基础的 local-floor 进去。
+   */
+  const allFeatures = [
+    ...(needLayersFeature ? ['layers'] : []),
+    'hand-tracking',
+    'bounded-floor',
+    'local-floor',
+  ];
+  const variants: string[][] = [
+    allFeatures,
+    allFeatures.filter(f => f !== 'hand-tracking'),
+    allFeatures.filter(f => f !== 'hand-tracking' && f !== 'layers'),
+    ['local-floor'],
+  ];
+
+  let session: XRSession | null = null;
+  const attempts: string[] = [];
+  for (const features of variants) {
+    try {
+      session = await navigator.xr!.requestSession('immersive-vr', {
+        optionalFeatures: features,
+      });
+      sessionFeatures = features.join('+') || '(无)';
+      break;
+    } catch (e) {
+      const msg = e instanceof Error ? `${e.name}:${e.message}` : String(e);
+      attempts.push(`${features.join('+') || '(无)'}→失败(${msg.slice(0, 40)})`);
+      console.warn('[vr] requestSession 失败', features, e);
+    }
+  }
+  if (!session) {
+    throw new Error(`无法进入 VR：${attempts.join(' | ').slice(0, 200)}`);
+  }
+
+  /*
+   * 调试时间线。
+   * 进了 Pico 的加载页却看不到画面，说明会话建起来了、卡在之后某一步；
+   * 而头显里没有控制台，所以把每一步记下来，回到 2D 页面后显示在信息面板里。
+   */
+  const t0 = performance.now();
+  const trace: string[] = [];
+  const mark = (s: string) => {
+    trace.push(`+${Math.round(performance.now() - t0)}ms ${s}`);
+    if (trace.length > 14) trace.shift();
+    (window as unknown as { __vrTrace?: string[] }).__vrTrace = trace;
+    console.log('[vr]', trace[trace.length - 1]);
+  };
+  mark(`会话OK(${sessionFeatures})`);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050506);
@@ -162,8 +282,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   renderer.xr.setFoveation(settings.foveation);
 
-  // 设备到底给不给原生合成层，进 session 就能判断。
+  // 设备到底给不给原生合成层。没申请就一定没给，不必再去碰 renderState.layers。
   const layersAvailable = Boolean(
+    requestLayers &&
     session.enabledFeatures?.includes('layers') &&
     typeof XRWebGLBinding !== 'undefined'
   );
@@ -176,20 +297,81 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   // 这时超采样是唯一能真正提清晰度的手段，值得付这份 GPU。
   // 必须在 setSession 之前定下来：base layer 一旦建好，倍率就改不动了
   // —— 所以设置面板里改「超采样」要重进 VR 才生效。
+  // 之前上限写死 2.0。实测 Pico 上眼缓冲只有 1440x1584，配合 ~150° 的视锥
+  // 只有约 10 px/°（面板应该有 ~20），所以放开上限让用户试更大的超采样。
   const framebufferScale = Math.min(
-    2,
+    4,
     layersEnabled ? scaleBase : scaleBase * settings.renderScale
   );
   renderer.xr.setFramebufferScaleFactor(framebufferScale);
+  /** 强制缓冲的结果，显示在诊断里 */
+  let forcedNote = settings.forceWidth > 0 ? `请求强制缓冲 ${settings.forceWidth}` : '';
 
-  // local-floor 拿不到就退回 local，至少能进得去
+  /*
+   * 强制指定眼缓冲尺寸。
+   *
+   * three 建层时只传 framebufferScaleFactor，不传像素尺寸：
+   *   new XRWebGLLayer(session, gl, { framebufferScaleFactor, ... })
+   * 而很多运行时会对这个倍率封顶（实测倍率给到 4.0，缓冲仍是 1440x1584），
+   * 于是角分辨率被锁死在 ~14 px/°，怎么调都不变清晰。
+   * XRWebGLLayer 的构造参数是支持直接指定 framebufferWidth/Height 的，
+   * 这里自己建一层传进去，绕开封顶。
+   */
+  // 说明：framebufferWidth/Height 和 setSession 的第二参数都是规范里有的
+  // （MDN 上的 XRWebGLLayer 构造参数），但 TypeScript 内置的 lib.dom 还没跟上，
+  // 所以这里做一次类型断言，只在运行时真的支持时才用。
+  const LayerCtor = XRWebGLLayer as unknown as
+    (new (s: XRSession, gl: WebGLRenderingContext, init: Record<string, unknown>) => XRWebGLLayer)
+    | undefined;
+  let forcedLayer: XRWebGLLayer | null = null;
+  if (settings.forceWidth > 0 && LayerCtor) {
+    try {
+      const w = settings.forceWidth;
+      const h = Math.round(w * 1.1);   // 跟实测到的 1440x1584 同比例
+      forcedLayer = new LayerCtor(session, renderer.getContext(), {
+        framebufferWidth:  w,
+        framebufferHeight: h,
+        antialias: false,              // 分辨率上去后就不需要 MSAA 了，省性能
+        alpha: true,
+      });
+      forcedNote = `强制缓冲 ${w}x${h}`;
+    } catch (e) {
+      forcedLayer = null;
+      forcedNote = `强制失败:${String(e).slice(0, 18)}`;
+    }
+  }
+
+  /** three 的 setSession 支持第二参数（自定义 base layer），但类型声明里没有 */
+  const setSession = renderer.xr.setSession as unknown as
+    (s: XRSession, layer?: XRWebGLLayer | null) => Promise<void>;
+
+  // local-floor 拿不到就退回 local，至少能进得去。
+  // 异常一定要能看到，否则界面上就是「点了 VR 没反应」。
+  const startSession = () =>
+    forcedLayer ? setSession(session, forcedLayer) : renderer.xr.setSession(session);
+
+  mark(`建层前 forced=${forcedLayer ? 'Y' : 'N'}`);
   try {
     renderer.xr.setReferenceSpaceType('local-floor');
-    await renderer.xr.setSession(session);
-  } catch {
-    renderer.xr.setReferenceSpaceType('local');
-    await renderer.xr.setSession(session);
+    await startSession();
+    // 注意：这里不能调后面才声明的工具函数（TDZ 会直接抛异常），内联取值
+    const vp = renderer.xr.getCamera().cameras[0] as
+      | (THREE.PerspectiveCamera & { viewport?: THREE.Vector4 }) | undefined;
+    mark(`setSession 完成 视口=${Math.round(vp?.viewport?.z ?? 0)}x${Math.round(vp?.viewport?.w ?? 0)}`);
+  } catch (e) {
+    mark(`setSession 失败:${e instanceof Error ? e.name : '?'}`);
+    console.error('[vr] setSession 失败', e);
+    try {
+      renderer.xr.setReferenceSpaceType('local');
+      await startSession();
+    } catch (e2) {
+      mark(`local 回退也失败:${e2 instanceof Error ? e2.name : '?'}`);
+      console.error('[vr] 回退到 local 仍失败', e2);
+      const msg = e2 instanceof Error ? `${e2.name}: ${e2.message}` : String(e2);
+      throw new Error(`VR 初始化失败（${msg}）`);
+    }
   }
+  mark('场景开始搭建');
 
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
   const maxTexSize = renderer.capabilities.maxTextureSize || 4096;
@@ -200,8 +382,21 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     const v = Math.ceil(Math.max(512, want) / g) * g;
     return Math.min(maxSourceSide, v);
   };
-  const vrSource = (src: string, size: number) =>
-    cloudinaryFit(src, Math.min(size, maxSourceSide), CFG.quality, settings.sharpen);
+  /**
+   * 取图。默认走「原图」：直接拿 CDN 上的原始分辨率，
+   * 不依赖任何测量结果 —— 之前按测量尺寸算，在部分设备上量出 512px，
+   * 拿去填上千像素的位置，糊就是这么来的。
+   */
+  const vrSource = (src: string, size: number) => {
+    const mode = settings.sourceMode;
+    lastAsk = mode === 'auto' ? Math.min(size, maxSourceSide) : mode;
+    if (mode === 'original') return cloudinaryOriginal(src, CFG.quality);
+    if (mode === 'auto') {
+      return cloudinaryFit(src, Math.min(size, maxSourceSide), CFG.quality, settings.sharpen);
+    }
+    // 固定长边
+    return cloudinaryFit(src, Math.min(mode, maxSourceSide), CFG.quality, settings.sharpen);
+  };
 
   /* ---------- 放映厅 ---------- */
   // 放映厅几乎铺满整个视野，用 PBR（MeshStandardMaterial）画等于按原生分辨率
@@ -255,21 +450,142 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   photo.position.set(0, CFG.screen.y, CFG.screen.z);
   scene.add(photo);
 
-  /* ---------- 银幕下方的信息条 ---------- */
+  /* ---------- 银幕下方的信息条 ----------
+   * 内容：标题 / 提示 / 诊断（含取图链路排查行）。
+   * 「设置」按钮是独立物体（见下），不挂在这个组里。
+   *
+   * 位置很讲究，踩过两个坑：
+   *   1) 画布不够高 → 最后几行被画到画布外，等于没画
+   *   2) 条子下缘落到地板平面以下 → 被地板挡掉，之前「照片」「请图」两行就是这么没的
+   * 所以现在把条子放到观众近处（3.5m）：同样的视角只需 1/3 的物理尺寸，
+   * 既完全避开地板，每行的像素数还更多，字更清楚。像影院字幕。
+   */
   const hudCanvas  = document.createElement('canvas');
   hudCanvas.width  = 2048;
-  hudCanvas.height = 384;
+  // 3 行大字 + 7 行诊断：高度按内容算，别再让最后几行画到画布外面
+  hudCanvas.height = 680;
   const hudCtx     = hudCanvas.getContext('2d')!;
   const hudTexture = new THREE.CanvasTexture(hudCanvas);
   hudTexture.colorSpace = THREE.SRGBColorSpace;
-  const hudH = CFG.hud.w * (hudCanvas.height / hudCanvas.width);
+
+  const hudGroup = new THREE.Group();
+  // 高度按画布宽高比推导，改画布尺寸时不用再手动同步
+  const hudW = CFG.hud.w;
+  const hudH = hudW * (hudCanvas.height / hudCanvas.width);
+  hudGroup.rotation.x = CFG.hud.tilt;
+
+  /*
+   * 自动抬到地板边缘之上。
+   *
+   * 地板是一张从 z=FLOOR_NEAR_Z 开始的水平面。它在屏幕上是一条斜线：
+   * 视线要「越过」这条边才看得到更远的东西。信息条虽然整体在地板前方
+   * （z 更小），但只要你站得比它高，条子下缘在屏幕上就可能落在这条线
+   * 下面 —— 那就被地板挡掉了。之前「照片」「请图」两行就是这么消失的。
+   *
+   * 判据（眼高 1.6m）：内容下缘的屏幕纵坐标必须高于地板边缘的屏幕纵坐标。
+   * 展开后就是： y_bottom > (eyeY - 0.001) * |z| / FLOOR_NEAR_Z - eyeY
+   */
+  {
+    const eyeY = camera.position.y;
+    // 内容下缘允许的最低世界 y（低于它就会被地板挡住）
+    const limit = (eyeY - FLOOR_Y) * Math.abs(CFG.hud.z) / Math.abs(FLOOR_NEAR_Z) - eyeY;
+    // 内容下缘相对信息条中心的局部偏移（含 tilt 造成的下沉）
+    const drop = hudH * (CFG.hud.contentBottom - 0.5)
+      + Math.sin(CFG.hud.tilt) * Math.abs(CFG.hud.z) * 0.5;
+    hudGroup.position.set(0, Math.max(CFG.hud.y, limit + drop + CFG.hud.clearance), CFG.hud.z);
+  }
+  scene.add(hudGroup);
+
+  /** 圆角矩形路径，信息条与按钮共用 */
+  const roundRectPath = (
+    c: CanvasRenderingContext2D, w: number, h: number, r: number
+  ) => {
+    const rr = Math.min(r, h / 2, w / 2);
+    c.beginPath();
+    c.moveTo(rr, 0);
+    c.arcTo(w, 0, w, h, rr);
+    c.arcTo(w, h, 0, h, rr);
+    c.arcTo(0, h, 0, 0, rr);
+    c.arcTo(0, 0, w, 0, rr);
+    c.closePath();
+  };
+  /*
+   * depthTest: false —— 信息条永远画在最上层。
+   * 之前一直有半截被挡，反复调高度也没用，因为挡它的东西不是我猜的那个；
+   * 与其继续猜场景里是谁在挡，不如直接让它不参与深度比较 ——
+   * 它本来就是 UI，压在场景之上是合理的。
+   */
   const hud  = new THREE.Mesh(
-    new THREE.PlaneGeometry(CFG.hud.w, hudH),
-    new THREE.MeshBasicMaterial({ map: hudTexture, transparent: true })
+    new THREE.PlaneGeometry(hudW, hudH),
+    new THREE.MeshBasicMaterial({
+      map: hudTexture, transparent: true, depthWrite: false, depthTest: false,
+    })
   );
-  hud.position.set(0, CFG.hud.y, CFG.hud.z);
-  hud.rotation.x = CFG.hud.tilt;
-  scene.add(hud);
+  hud.renderOrder = 1000;
+  hudGroup.add(hud);
+
+  /* 「设置」按钮
+   * 两个要点：
+   * 1) 不放进 hudGroup —— 挂在信息条下面会落到地板平面以下，被地板挡住。
+   * 2) 放到观众近处（2.5m 外）而不是银幕那边。
+   *    同样看清的前提下，越近需要的物理尺寸越小、占的像素越少 —— 反过来
+   *    就是同样尺寸能给出更大的视角和更多像素。0.7m @ 2.5m ≈ 16°，
+   *    比 1.4m @ 9m 的 8.9° 清楚得多（字高从 ~24 涨到 ~40 物理像素）。
+   */
+  const btnCanvas  = document.createElement('canvas');
+  btnCanvas.width  = 512;
+  btnCanvas.height = 128;
+  const btnCtx     = btnCanvas.getContext('2d')!;
+  const btnTexture = new THREE.CanvasTexture(btnCanvas);
+  btnTexture.colorSpace = THREE.SRGBColorSpace;
+  const btnW  = 0.7;
+  const btnH  = btnW * (btnCanvas.height / btnCanvas.width);
+  // 同样不参与深度比较，并且排在信息条之后，保证按钮压在最上面
+  const btnMat = new THREE.MeshBasicMaterial({
+    map: btnTexture, transparent: true, depthWrite: false, depthTest: false,
+  });
+  const hudButton = new THREE.Mesh(new THREE.PlaneGeometry(btnW, btnH), btnMat);
+  hudButton.renderOrder = 1001;
+  // 右手边、略低于视线：低头一点就能看到，又不挡银幕。
+  // z 要比信息条更靠前，免得被信息条挡住
+  hudButton.position.set(0.95, 1.15, -2.0);
+  hudButton.rotation.x = -0.25;
+  hudButton.rotation.y = -0.35;
+  scene.add(hudButton);
+
+  let btnHover = false;
+  const drawHudButton = () => {
+    const w = btnCanvas.width;
+    const h = btnCanvas.height;
+    btnCtx.clearRect(0, 0, w, h);
+    roundRectPath(btnCtx, w, h, 30);
+    btnCtx.fillStyle = `rgba(10,10,14,${btnHover ? 0.9 : 0.55})`;
+    btnCtx.fill();
+    if (btnHover) {
+      btnCtx.strokeStyle = 'rgba(255,255,255,0.85)';
+      btnCtx.lineWidth = 4;
+      btnCtx.stroke();
+    }
+    // 扳手图标
+    btnCtx.strokeStyle = btnHover ? '#fff' : 'rgba(240,240,240,0.85)';
+    btnCtx.lineWidth = 9;
+    btnCtx.lineCap = 'round';
+    btnCtx.beginPath();
+    btnCtx.arc(58, 64, 20, Math.PI * 0.75, Math.PI * 2.1);
+    btnCtx.stroke();
+    btnCtx.beginPath();
+    btnCtx.moveTo(72, 50);
+    btnCtx.lineTo(104, 82);
+    btnCtx.stroke();
+    btnCtx.textAlign = 'left';
+    btnCtx.fillStyle = btnHover ? '#fff' : 'rgba(240,240,240,0.9)';
+    btnCtx.font = '500 54px system-ui, -apple-system, sans-serif';
+    btnCtx.fillText('设置', 128, 88);
+    btnTexture.needsUpdate = true;
+  };
+  drawHudButton();
+
+  mark('放映厅+银幕就绪');
 
   /* ---------- 手柄 ---------- */
   const rayGeom = new THREE.BufferGeometry().setFromPoints([
@@ -298,6 +614,115 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let offY  = 0;
   let texture: THREE.Texture | null = null;
   let disposed = false;
+
+  /**
+   * 直接测量：把宽 w 米的物体投影到屏幕上，量它实际占多少像素。
+   *
+   * 早先是用「投影矩阵 p[0] × 视口宽 / 2」推算的，但在部分设备上会取到错的
+   * 视口（比如只拿到纹理数组的一小块），算出来的占位小了好几倍 ——
+   * 于是只向 CDN 要了几百像素的图，糊是必然的。
+   * 这里改成把两端的世界坐标真的投影一遍，数出来是多少就是多少。
+   * 必须在 renderer.render 之后调用，那时相机矩阵才是当帧的。
+   */
+  const measureFootprintPx = (w: number): number => {
+    const eye = renderer.xr.getCamera().cameras[0] as
+      | (THREE.PerspectiveCamera & { viewport?: THREE.Vector4 })
+      | undefined;
+    const vpW = effectiveEyeWidth() || (eye?.viewport?.z ?? 0);
+    if (!(vpW > 0)) return 0;
+    // 银幕平面与视线垂直，取它左右两端投影后的水平像素差即可
+    const a = new THREE.Vector3(-w / 2, CFG.screen.y, CFG.screen.z).project(eye!);
+    const b = new THREE.Vector3(w / 2, CFG.screen.y, CFG.screen.z).project(eye!);
+    return Math.abs((b.x - a.x) * vpW / 2);
+  };
+
+  /**
+   * 独立再测一遍角分辨率（像素 / 度），用来交叉验证下面的密度。
+   *
+   * 不碰投影矩阵，纯几何：在银幕左右各取一点，用点积算它们相对眼睛的真实
+   * 夹角，再除投影后的像素差。之前靠「投影矩阵 p[0] × 视口宽 / 2」推算，
+   * 在部分设备上视口取错，结果差了 5 倍 —— 于是只下了一张几百像素的图。
+   */
+  const measurePxPerDeg = (): number => {
+    const eye = renderer.xr.getCamera().cameras[0] as
+      | (THREE.PerspectiveCamera & { viewport?: THREE.Vector4 })
+      | undefined;
+    const vpW = effectiveEyeWidth() || (eye?.viewport?.z ?? 0);
+    if (!(vpW > 0) || !eye) return 0;
+    const wp = new THREE.Vector3();
+    eye.getWorldPosition(wp);
+    const half = 2;   // 半宽 2m，夹角够大才量得准
+    const L = new THREE.Vector3(-half, CFG.screen.y, CFG.screen.z);
+    const R = new THREE.Vector3( half, CFG.screen.y, CFG.screen.z);
+    const angDeg = THREE.MathUtils.radToDeg(
+      L.clone().sub(wp).angleTo(R.clone().sub(wp))
+    );
+    if (!(angDeg > 0.1)) return 0;
+    const a = L.clone().project(eye);
+    const b = R.clone().project(eye);
+    const px = Math.abs((b.x - a.x) * vpW / 2);
+    return px / angDeg;
+  };
+
+  /** 原始测量值，纯排查用：眼宽 / 屏幕占位数 / 采样计数 / 拒收计数 */
+  const dbg = { eyeW: 0, px: 0, n: 0, rej: 0 };
+
+  /** 采一次密度样本，攒够一批就定稿（取中位数，抗异常值） */
+  const sampleDensity = () => {
+    if (measuredPxPerMeter) return;
+    dbg.eyeW = effectiveEyeWidth();
+    dbg.px = Math.round(measureFootprintPx(CFG.photo.maxW));
+    const d = dbg.px / CFG.photo.maxW;
+    if (!(d > 20 && d < 4000)) { dbg.rej++; return; }
+    /*
+     * 只在正视时采信，否则透视拉伸会把结果压小。
+     * 基准不能拿首帧的一次性测量值 —— 那一帧头可能没转过来，量出 5.0 的话
+     * 真实值（~155）反而会被当成异常值全拒收，采样永远是 0。
+     * 改用「视口宽 / 视场角」推算的参考密度，这个和头的朝向无关。
+     */
+    const fov = horizontalFov();
+    const eyeW = dbg.eyeW;
+    const nominal = (fov > 5 && eyeW > 0) ? (eyeW / fov) : 0;
+    if (densitySamples.length < 5 || !nominal ||
+        Math.abs(d - nominal) < nominal * 0.4) {
+      densitySamples.push(d);
+      if (d > densityMax) densityMax = d;
+    } else {
+      dbg.rej++;
+    }
+    dbg.n = densitySamples.length;
+    if (densitySamples.length >= 24) {
+      const s = [...densitySamples].sort((a, b) => a - b);
+      measuredPxPerMeter = s[Math.floor(s.length / 2)];
+      loadedStep = 0;          // 之前按错尺寸下的图换掉
+      bumpDiagnostics();
+    }
+  };
+
+  /** 独立测得的角分辨率（px/°）；0 = 还没量到 */
+  let measuredPxPerDeg = 0;
+  /** 手柄摇杆轴的原始值，用来确认 Pico 的实际映射（左右/上下分别是哪个） */
+  let axesDump = '';
+
+  /*
+   * 密度采样。
+   *
+   * 教训：一次性测量不可靠。测量那一帧如果头没正对银幕，照片会偏到视野边缘，
+   * 而透视投影在边缘是拉伸的，横向像素差会被压扁 —— 实测就出现过 104° 视锥
+   * 却量出 5.0 px/°（应为 ~14）的情况，而且这个值被永久缓存，导致纹理尺寸
+   * 一路算错。
+   *
+   * 所以改成：每次测量都算出「照片相对眼睛的真实夹角」，只在这个夹角接近
+   * 正视预期值时才采信（说明头正对着银幕），攒够一批取中位数。
+   */
+  const densitySamples: number[] = [];
+  let densityMax = 0;
+
+  /**
+   * 实测得到的「每米多少像素」（按 1 倍银幕、照片正好铺满时的宽度算）。
+   * 存成密度而不是绝对像素，这样切换银幕大小时不用重量。
+   */
+  let measuredPxPerMeter = 0;
 
   /**
    * 角分辨率（像素 / 弧度）—— 整件事的核心。
@@ -356,9 +781,13 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
    * forPanel=true 用于原生合成层（按面板密度），否则按眼缓冲实测密度。
    */
   const footprintPx = (w: number, forPanel = false): number => {
+    // 有实测密度就用它（原生合成层按面板采样，密度比眼缓冲高 panelBoost 倍）
+    if (measuredPxPerMeter > 0) {
+      return Math.round(w * measuredPxPerMeter * (forPanel ? CFG.panelBoost : 1));
+    }
+    // 还没量到时的兜底，量到后会自动修正
     const pxPerRad = measureEyePxPerRad() * (forPanel ? CFG.panelBoost : 1);
-    // 还没进第一帧、量不到时给个保守值，第一帧后会自动修正
-    return pxPerRad > 0 ? Math.round(screenRad(w) * pxPerRad) : 1408;
+    return pxPerRad > 0 ? Math.round(screenRad(w) * pxPerRad) : 1600;
   };
 
   type PhotoLayerPainter = {
@@ -381,7 +810,23 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let photoLayerImageDirty = false;
   let photoLayerDirty = false;
   let layerPainter: PhotoLayerPainter | null = null;
-  let layersUsable = layersEnabled && Boolean(session.renderState.layers);
+  /*
+   * 取 XRWebGLBinding。没有 layers 支持时它是 null —— 之前直接拿去用，
+   * `binding.getSubImage(...)` 当场抛 "Cannot read properties of null"，
+   * 整个 VR 会话起不来。所以一律走这个安全包装。
+   */
+  const getBindingSafe = (): XRWebGLBinding | null => {
+    if (!layersAvailable || !settings.useLayers) return null;
+    try {
+      return renderer.xr.getBinding() ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  let layersUsable = Boolean(
+    layersEnabled && getBindingSafe() && session.renderState.layers?.length
+  );
   let layerStatus = !layersAvailable
     ? '设备/浏览器未提供 WebXR Layers，已按 3D Plane 路径优化'
     : !settings.useLayers
@@ -399,42 +844,78 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let overlayOpen = false;
   /** 平滑后的帧时长，用来看有没有掉帧（掉帧会触发重投影，整幅画面拖影） */
   let frameMs = 0;
+  /** 最后一次的取图参数：数字是长边像素，'original' 表示取原图 */
+  let lastAsk: number | string = 0;
+
+  /** 手柄上报了几个键：-1 还没读到手柄，0 说明浏览器根本没给按键 */
+  let btnCount = -1;
+  /** 最近一次按下的键号（数组下标），用来一项一项对出按键映射 */
+  let lastBtn = -1;
 
   const bumpDiagnostics = () => { diagnosticsVersion++; };
 
   const sizeText = (s: { w: number; h: number }) => s.w > 0 && s.h > 0 ? `${s.w}x${s.h}` : 'n/a';
   const errorText = (e: unknown) => e instanceof Error ? e.message : String(e || '未知错误');
 
-  const baseLayerText = () => {
-    const base = renderer.xr.getBaseLayer() as
-      | XRWebGLLayer
-      | XRProjectionLayer
-      | undefined;
-    if (!base) return 'n/a';
-    const w = ('textureWidth' in base ? base.textureWidth : base?.framebufferWidth) ?? 0;
-    const h = ('textureHeight' in base ? base.textureHeight : base?.framebufferHeight) ?? 0;
-    return w > 0 && h > 0 ? `${w}x${h}` : 'n/a';
+  const xrEye = () => renderer.xr.getCamera().cameras[0] as
+    | (THREE.PerspectiveCamera & { viewport?: THREE.Vector4 })
+    | undefined;
+
+  /** 投影矩阵给出的水平视场角（度） */
+  const horizontalFov = (): number => {
+    const p = xrEye()?.projectionMatrix.elements;
+    if (!p || !(p[0] > 0)) return 0;
+    return THREE.MathUtils.radToDeg(2 * Math.atan(1 / p[0]));
+  };
+
+  /*
+   * 单眼真正分到多少像素宽。
+   *
+   * 只有确属「一张纹理里横向并排多个视口」时才做折算：判据是存在 x > 0 的
+   * 视口 —— 那才是并排的证据。
+   * 若所有视口的 x 都是 0（说明是纹理数组 / 每眼一张独立纹理），
+   * 就直接取 viewport.z。之前按「眼的个数」折算过，实测 x0 眼2 的情况下
+   * 把 1440 误算成 720，密度直接腰斩，纹理也跟着取小了一半。
+   */
+  const effectiveEyeWidth = (): number => {
+    const cams = renderer.xr.getCamera().cameras as
+      ((THREE.PerspectiveCamera & { viewport?: THREE.Vector4 }) | undefined)[];
+    const vs = cams
+      .map(c => c?.viewport)
+      .filter((v): v is THREE.Vector4 => Boolean(v && v.z > 0));
+    if (!vs.length) return 0;
+    const raw = vs[0]!.z;
+    const xs = new Set(vs.map(v => Math.round(v.x)));
+    const packed = [...xs].filter(x => x > 0).length + 1;   // x>0 的都算并排
+    return Math.round(raw / packed);
+  };
+
+  /** 实际分配到的眼缓冲尺寸（单眼）。运行时可能不理会我们请求的倍率，看这个才准 */
+  const eyeBufferText = (): string => {
+    const cam = xrEye();
+    const w = cam?.viewport?.z ?? 0;
+    const h = cam?.viewport?.w ?? 0;
+    return w > 0 && h > 0 ? `${Math.round(w)}x${Math.round(h)}` : 'n/a';
   };
 
   const diagnosticLines = () => {
-    const mode = photoLayer && photoLayerInState
-      ? 'XRQuadLayer ACTIVE'
-      : layersUsable
-        ? 'XRQuadLayer ready/hidden'
-        : '3D Plane FALLBACK';
     const forPanel = Boolean(photoLayer && photoLayerInState);
     const foot = footprintPx(photo.scale.x, forPanel);
-    const eyeDeg = measureEyePxPerRad() * Math.PI / 180;
-    // 采样比 = 纹理像素 / 实际需要的像素。>1 是缩小采样（摩尔纹来源），<1 是插值（发虚）
+    // 采样比 = 纹理像素 / 实际需要的像素。>1 缩小采样（摩尔纹），<1 插值（发虚）
     const ratio = foot > 0 && sourcePixels.w > 0
       ? (sourcePixels.w / (foot * zoom)).toFixed(2)
       : 'n/a';
     return [
-      `VR显示路径: ${mode} | 原因: ${layerStatus}`,
-      `源图: ${sizeText(sourcePixels)} | 银幕占位: ${foot}px | 采样比: ${ratio}（1.0 最佳，>1 摩尔纹，<1 发虚）`,
-      `眼缓冲密度: ${eyeDeg.toFixed(1)} px/° | renderScale: ${framebufferScale.toFixed(2)} (原生 ${nativeScale.toFixed(2)}) | XR Base: ${baseLayerText()}`,
-      `帧时: ${frameMs.toFixed(1)}ms${frameMs > 14 ? ' ⚠掉帧→重投影拖影' : ''} | 档位: ${loadedStep || 'n/a'} | zoom: ${zoom.toFixed(2)}x`,
-      `银幕 ${settings.screenScale.toFixed(2)}x · 余量 ${settings.superSample} · 锐化 ${settings.sharpen} · mip ${settings.mipmaps ? '开' : '关'} | 长按摇杆开设置`,
+      `缓冲 ${eyeBufferText()} 实宽${effectiveEyeWidth() || '-'} ${forcedNote}`,
+      `特性 ${sessionFeatures}`,
+      `摇杆 ${axesDump || '—'}`,
+      `视锥 ${horizontalFov().toFixed(0)}° 缓冲${eyeBufferText()}`,
+      `倍率 ${framebufferScale.toFixed(2)}(原生${nativeScale.toFixed(2)})`,
+      `密度 ${measuredPxPerMeter ? measuredPxPerMeter.toFixed(0) : '量中'}px/m 占位 ${foot}px`,
+      `源图 ${sizeText(sourcePixels)} 请图 ${lastAsk} 比 ${ratio}`,
+      `照片 ${photo.scale.x.toFixed(2)}m 比 ${photoAspect.toFixed(2)} zoom ${zoom.toFixed(1)}`,
+      `路径 ${(photoLayer && photoLayerInState ? 'QuadLayer' : '3D Plane').slice(0, 10)} ${layerStatus.slice(0, 26)}`,
+      `银幕${settings.screenScale} 余量${settings.superSample} 锐化${settings.sharpen} mip${settings.mipmaps ? '开' : '关'} ${photoLayer && photoLayerInState ? 'Quad' : 'Plane'} 键${lastBtn < 0 ? '-' : lastBtn}/${btnCount}`,
     ];
   };
 
@@ -560,8 +1041,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
         Math.min(maxTexSize, Math.round(footprintPx(w, true) * settings.superSample))
       );
       const pixelH = Math.max(1, Math.min(maxTexSize, Math.round(pixelW * (h / w))));
-      const binding = renderer.xr.getBinding();
+      const binding = getBindingSafe();
       if (!binding?.createQuadLayer) {
+        layersUsable = false;
         layerStatus = 'XRWebGLBinding 不支持 createQuadLayer，暂用 3D Plane';
         bumpDiagnostics();
         return;
@@ -611,7 +1093,12 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     if (!photoLayer || !photoLayerImage || !photoLayerInState) return;
     if (!photoLayerDirty && !photoLayer.needsRedraw) return;
     try {
-      const binding = renderer.xr.getBinding();
+      const binding = getBindingSafe();
+      if (!binding) {
+        layersUsable = false;
+        destroyPhotoLayer();
+        return;
+      }
       const sub = binding.getSubImage(photoLayer, frame);
       const p = ensureLayerPainter();
 
@@ -694,27 +1181,34 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     hudKey = key;
     const w = hudCanvas.width;
     hudCtx.clearRect(0, 0, w, hudCanvas.height);
+    // 半透明底：银幕溢光在这块深底上才能看清字
+    roundRectPath(hudCtx, w, hudCanvas.height, 30);
+    hudCtx.fillStyle = 'rgba(10,10,14,0.42)';
+    hudCtx.fill();
+
     hudCtx.textAlign = 'center';
-    hudCtx.fillStyle = 'rgba(255,255,255,0.9)';
-    hudCtx.font = '600 54px system-ui, -apple-system, sans-serif';
-    hudCtx.fillText(`${index + 1} / ${photos.length}　${photos[index].title}`, w / 2, 62);
-    hudCtx.fillStyle = 'rgba(255,255,255,0.45)';
-    hudCtx.font = '400 34px system-ui, -apple-system, sans-serif';
+    hudCtx.fillStyle = 'rgba(255,255,255,0.95)';
+    hudCtx.font = '700 72px system-ui, -apple-system, sans-serif';
+    hudCtx.fillText(`${index + 1} / ${photos.length}　${photos[index].title}`, w / 2, 78);
+    hudCtx.fillStyle = 'rgba(255,255,255,0.62)';
+    hudCtx.font = '600 56px system-ui, -apple-system, sans-serif';
     const tip = note
       ?? (zoom > 1.01
-        ? `已放大 ${Math.round(zoom * 100)}% · 扳机拖动 · 摇杆按下复位`
-        : '摇杆上下 缩放 · 左右 翻页 · 扳机按住 拖动 · 摇杆按下 复位 · 长按侧键 退出');
-    hudCtx.fillText(tip, w / 2, 118);
+        ? `已放大 ${Math.round(zoom * 100)}% · 扳机拖动 · 指向右边「设置」扣扳机可调画质`
+        : '摇杆上下 缩放 · 左右 翻页 · 扳机按住 拖动 · 指向右边「设置」扣扳机可调画质');
+    hudCtx.fillText(tip, w / 2, 150);
 
     if (settings.diagnostics) {
       hudCtx.textAlign = 'left';
-      hudCtx.font = '400 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+      hudCtx.font = '700 62px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
       hudCtx.fillStyle = photoLayer && photoLayerInState
-        ? 'rgba(145,255,180,0.88)'
-        : 'rgba(255,204,128,0.88)';
+        ? 'rgba(145,255,180,0.95)'
+        : 'rgba(255,204,128,0.95)';
       const lines = diagnosticLines();
+      // 行距 64px。等宽字体每个字符约 0.6em = 36px，一行最多约 54 个字符，
+      // 诊断内容要按这个长度裁剪，否则右侧会被画到画布外。
       for (let i = 0; i < lines.length; i++) {
-        hudCtx.fillText(lines[i], 88, 174 + i * 38);
+        hudCtx.fillText(lines[i].slice(0, 52), 48, 248 + i * 64);
       }
     }
     hudTexture.needsUpdate = true;
@@ -911,6 +1405,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     setPhotoLayerInRenderState(!next);
     photo.visible = !(photoLayer && photoLayerInState);
     hud.visible = !next;
+    // 「设置」按钮不能跟着主信息条一起藏：面板开着时它还要用来关闭
     drawHud();
   };
 
@@ -963,7 +1458,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   /** 改了这些就得重下图：要么影响 URL，要么影响该下多大 */
   const NEEDS_REFETCH: ReadonlySet<string> = new Set([
-    'screenScale', 'superSample', 'sharpen', 'useLayers', 'reset',
+    'screenScale', 'superSample', 'sharpen', 'useLayers', 'sourceMode', 'reset',
   ]);
 
   const toggleSettings = () => {
@@ -999,8 +1494,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     const ratio = foot > 0 && sourcePixels.w > 0
       ? (sourcePixels.w / (foot * zoom)).toFixed(2)
       : '—';
-    const path = layersUsable ? 'QuadLayer' : '3D Plane';
-    return `采样比 ${ratio}（1.0 最佳） · 占位 ${foot}px · 源图 ${sourcePixels.w || '—'} · 帧时 ${frameMs.toFixed(1)}ms · ${path}`;
+    // btnCount：手柄上报了几个键。-1 没读到手柄，0 说明浏览器压根没给按键
+    const gp = btnCount < 0 ? '' : ` · 键${btnCount}`;
+    return `采样比 ${ratio} 最佳1.0 · 占位 ${foot}px · 源图 ${sourcePixels.w || '—'} · 眼缓冲 ${eyeBufferText()} · ${frameMs.toFixed(1)}ms${gp}`;
   };
 
   const pick = (i: number) => {
@@ -1037,13 +1533,26 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     return hit?.uv ? hit.uv.clone() : null;
   };
 
+  /**
+   * 射线是否指在 HUD 的「设置」按钮上。
+   * 这是打开设置的保底入口 —— 不依赖手柄上报任何按键，
+   * 只要扳机能用（拖动画面一直在用，肯定是好的）就能进设置。
+   */
+  const hudButtonHit = (src: XRInputSource, frame: XRFrame): boolean => {
+    if (!hudButton.visible || !aim(src, frame)) return false;
+    return raycaster.intersectObject(hudButton, false).length > 0;
+  };
+
   /* ---------- 手柄状态 ---------- */
   interface CtrlState {
     prev:  boolean[];
     latch: boolean;
     gripAt: number | null;
-    /** 摇杆按下的起始时刻：短按复位，长按开设置 */
-    stickAt: number | null;
+    /**
+     * X 键按下的起始时刻。
+     * null = 没按, >0 = 按下时刻, -1 = 长按已触发, -2 = 松手已处理
+     */
+    menuAt: number | null;
     drag:   { u: number; v: number } | null;
     /** 照片墙：拖动时的起始朝向与累计角度 */
     dragYaw:   number | null;
@@ -1056,7 +1565,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     let s = states.get(src);
     if (!s) {
       s = {
-        prev: [], latch: false, gripAt: null, stickAt: null, drag: null,
+        prev: [], latch: false, gripAt: null, menuAt: null, drag: null,
         dragYaw: null, dragMoved: 0, latchX: false, latchY: false,
       };
       states.set(src, s);
@@ -1077,28 +1586,40 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       const st = stateOf(src);
       const { x: ax, y: ay } = stickAxes(gp as Gamepad);
       const btn = gp.buttons;
-      const trigger = btn[0]?.pressed ?? false;
+      axesDump = `n${gp.axes.length} [${[...gp.axes].slice(0, 4).map(v => v.toFixed(1)).join(' ')}] 用(${ax.toFixed(1)},${ay.toFixed(1)})`;
+      const trigger = isDown(btn[0]);
+      // 手柄到底报了几个键；0 就说明浏览器根本没给按键
+      btnCount = btn.length;
+      // 记下新按下的键号：不管它在哪一帧、也不管当前是哪个界面
+      for (let i = 0; i < btn.length; i++) {
+        if (isDown(btn[i]) && !st.prev[i] && i !== 0) lastBtn = i;
+      }
 
-      // 摇杆按下：短按复位，长按开 / 关设置面板。
-      // stickAt: null = 没按, >0 = 按下时刻, -1 = 长按已触发，按住不放也不再重复
-      const stick = btn[3]?.pressed ?? false;
-      if (stick) {
-        if (st.stickAt === null) {
-          st.stickAt = now;
-        } else if (st.stickAt > 0 && now - st.stickAt > CFG.menuHoldMs) {
-          st.stickAt = -1;
+      // X 键（xr-standard button 4）长按 = 开 / 关设置面板；短按仍是上一张。
+      // 摇杆按下（3）在各家实现里差异太大，别再拿它做长按。
+      // st.menuAt: null = 没按, >0 = 按下时刻, -1 = 长按已触发，按住不放不再重复
+      const menuBtn = isDown(btn[MENU_BUTTON]);
+      if (menuBtn) {
+        if (st.menuAt === null) {
+          st.menuAt = now;
+        } else if (st.menuAt > 0 && now - st.menuAt > CFG.menuHoldMs) {
+          st.menuAt = -1;
           pulse(gp as Gamepad, 0.8, 60);
           toggleSettings();
           st.prev = btn.map(b => b.pressed);
           continue;
         }
-      } else if (st.stickAt !== null) {
-        // 松手时还没到长按阈值，那就是短按
-        if (st.stickAt > 0 && !settingsPanel.isOpen()) {
-          reset();
-          pulse(gp as Gamepad, 0.4, 30);
-        }
-        st.stickAt = null;
+      } else if (st.menuAt !== null) {
+        // 松手时才判定短按：整个按下期间没到长按阈值，才算「点了一下」。
+        // 在按下沿就翻页的话，长按开菜单时会顺带翻走一张。
+        if (st.menuAt > 0) showPhoto(index - 1);
+        st.menuAt = -2;   // 已处理过这次松手，别再触发
+      }
+
+      // 摇杆按下：复位（短按即可，不再兼做长按）
+      if (isDown(btn[3]) && !st.prev[3]) {
+        reset();
+        pulse(gp as Gamepad, 0.4, 30);
       }
 
       // 设置面板打开时，手柄只用来点选项。
@@ -1117,7 +1638,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
           }
         }
         // 侧键 / 菜单键：关掉面板；长按侧键仍然退出 VR
-        const gripS = btn[1]?.pressed ?? false;
+        const gripS = isDown(btn[1]);
         if (gripS && st.gripAt === null) st.gripAt = now;
         if (!gripS && st.gripAt !== null) {
           if (now - st.gripAt < CFG.exitHoldMs) toggleSettings();
@@ -1129,19 +1650,19 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
           return;
         }
         for (const b of CFG.menuButtons) {
-          if (btn[b]?.pressed && !st.prev[b]) toggleSettings();
+          if (isDown(btn[b]) && !st.prev[b]) toggleSettings();
         }
-        st.prev = btn.map(b => b.pressed);
+        st.prev = btn.map(isDown);
         continue;
       }
 
       // Pico 4 菜单键不是 xr-standard 的固定按钮，常见实现会放在 6/7。
       for (const b of CFG.menuButtons) {
-        if (btn[b]?.pressed && !st.prev[b]) togglePicker();
+        if (isDown(btn[b]) && !st.prev[b]) togglePicker();
       }
 
       // 侧键：短按开关照片墙，长按退出 VR
-      const grip = btn[1]?.pressed ?? false;
+      const grip = isDown(btn[1]);
       if (grip && st.gripAt === null) st.gripAt = now;
       if (!grip && st.gripAt !== null) {
         if (now - st.gripAt < CFG.exitHoldMs) togglePicker();
@@ -1154,6 +1675,13 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       }
 
       if (pickerOpen) {
+        // 「设置」按钮仍然可用，不用先退出照片墙
+        if (trigger && !st.prev[0] && hudButtonHit(src, frame)) {
+          pulse(gp as Gamepad, 0.6, 40);
+          toggleSettings();
+          st.prev = btn.map(isDown);
+          continue;
+        }
         // 悬停高亮
         if (aim(src, frame)) {
           const hit = picker.hitIndex(raycaster);
@@ -1193,9 +1721,21 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
           pulse(gp as Gamepad, 0.4, 30);
         } else if (Math.abs(ax) < 0.35) st.latchX = false;
 
-        st.prev = btn.map(b => b.pressed);
+        st.prev = btn.map(isDown);
         continue;
       }
+
+      // 指向「设置」按钮扣扳机 —— 打开设置的主要入口
+      if (trigger && !st.prev[0] && hudButtonHit(src, frame)) {
+        pulse(gp as Gamepad, 0.6, 40);
+        toggleSettings();
+        st.prev = btn.map(isDown);
+        continue;
+      }
+
+      // 按钮悬停高亮
+      const overBtn = hudButtonHit(src, frame);
+      if (overBtn !== btnHover) { btnHover = overBtn; drawHudButton(); }
 
       // 缩放：摇杆上下，锚点取射线指向处
       if (Math.abs(ay) > 0.15) {
@@ -1225,17 +1765,17 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
         st.drag = null;
       }
 
-      // 摇杆按下的复位在上面统一处理（要和长按开设置区分开）
+      // B（5）下一张。A（4）的短按上一张在上面松手时判定
+      if (isDown(btn[5]) && !st.prev[5]) showPhoto(index + 1);
 
-      // A/B（xr-standard 的 4/5）也能翻页，方便不习惯摇杆的人
-      if ((btn[4]?.pressed ?? false) && !st.prev[4]) showPhoto(index - 1);
-      if ((btn[5]?.pressed ?? false) && !st.prev[5]) showPhoto(index + 1);
-
-      st.prev = btn.map(b => b.pressed);
+      st.prev = btn.map(isDown);
     }
 
     if (pickerOpen && !hovered) picker.setHover(null);
-    if (settingsPanel.isOpen() && !hoveredSettings) settingsPanel.clearHover();
+    if (settingsPanel.isOpen()) {
+      if (!hoveredSettings) settingsPanel.clearHover();
+      settingsPanel.setStatus(statusLine());
+    }
   };
 
   /* ---------- 主循环 ---------- */
@@ -1245,14 +1785,17 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let firstShowDone = false;
   renderer.setAnimationLoop((_time, frame) => {
     if (!frame) return;
+    try {
     const now = performance.now();
     const dt  = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
     // 指数平滑，用来在 HUD 上看有没有掉帧
     frameMs = frameMs ? frameMs + (dt * 1000 - frameMs) * 0.05 : dt * 1000;
 
+    if (!firstShowDone) mark('首帧');
     if (!firstShowDone && measureEyePxPerRad() > 0) {
       firstShowDone = true;
+      mark('首帧取图');
       showPhoto(index);
     }
 
@@ -1269,6 +1812,19 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       else drawHud();
     }
     renderer.render(scene, camera);
+
+    // 渲染之后相机矩阵才是当帧的，这时量才准
+    sampleDensity();
+    if (!measuredPxPerDeg) {
+      const d = measurePxPerDeg();
+      if (d > 3 && d < 200) { measuredPxPerDeg = d; bumpDiagnostics(); }
+    }
+    } catch (e) {
+      // 主循环里的异常会让画面永远停在加载页，必须留痕
+      mark(`循环异常:${e instanceof Error ? e.name : '?'}`);
+      console.error('[vr] 主循环异常', e);
+      renderer.setAnimationLoop(null);
+    }
   });
 
   /* ---------- 收尾 ---------- */
@@ -1308,6 +1864,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     dispose();
     onExit?.();
   });
+
+  mark('主循环已启动');
 
   drawHud('载入中…');
 

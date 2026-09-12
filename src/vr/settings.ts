@@ -18,12 +18,19 @@ export interface VrSettings {
   superSample: number;
   /** Cloudinary 服务端锐化强度 */
   sharpen: number;
+  /** 取图方式：original=原图（默认，最稳），auto=按测量尺寸，或固定长边 */
+  sourceMode: 'original' | 'auto' | 2048 | 3072 | 4096;
   /** 主图是否生成 mipmap */
   mipmaps: boolean;
   /** 固定注视点渲染强度 */
   foveation: number;
   /** 设备支持时是否使用原生合成层 */
   useLayers: boolean;
+  /**
+   * 强制指定眼缓冲宽度（像素，单眼）。0 = 交给倍率。
+   * framebufferScaleFactor 在很多运行时会被封顶，直接指定尺寸是绕过它的办法。
+   */
+  forceWidth: 0 | 1920 | 2560 | 3200 | 3840;
   /** 是否显示诊断信息 */
   diagnostics: boolean;
 }
@@ -33,13 +40,15 @@ export const DEFAULT_SETTINGS: VrSettings = {
   renderScale: 1.35,
   superSample: 1.06,
   sharpen:     25,
+  sourceMode:  'original',
   mipmaps:     true,
   foveation:   0,
   useLayers:   true,
+  forceWidth:  0,
   diagnostics: true,
 };
 
-type SettingValue = number | boolean;
+type SettingValue = number | boolean | string;
 
 interface SettingRow {
   key:     keyof VrSettings;
@@ -71,6 +80,10 @@ const ROWS: SettingRow[] = [
       { label: '1.35', value: 1.35 },
       { label: '1.5',  value: 1.5  },
       { label: '1.75', value: 1.75 },
+      { label: '2.0',  value: 2.0  },
+      { label: '2.5',  value: 2.5  },
+      { label: '3.0',  value: 3.0  },
+      { label: '4.0',  value: 4.0  },
     ],
   },
   {
@@ -98,6 +111,18 @@ const ROWS: SettingRow[] = [
     ],
   },
   {
+    key:   'sourceMode',
+    label: '取图',
+    hint: '原图最清晰；自动按测量尺寸',
+    options: [
+      { label: '原图',   value: 'original' },
+      { label: '自动',   value: 'auto'     },
+      { label: '2048',   value: 2048       },
+      { label: '3072',   value: 3072       },
+      { label: '4096',   value: 4096       },
+    ],
+  },
+  {
     key: 'mipmaps',
     label: 'Mipmap',
     hint: '关掉可确认摩尔纹来源',
@@ -114,6 +139,18 @@ const ROWS: SettingRow[] = [
       { label: '关', value: 0   },
       { label: '中', value: 0.5 },
       { label: '强', value: 1   },
+    ],
+  },
+  {
+    key:   'forceWidth',
+    label: '强制缓冲',
+    hint: '绕过被封顶的倍率 · 需重进VR',
+    options: [
+      { label: '自动',  value: 0    },
+      { label: '1920',  value: 1920 },
+      { label: '2560',  value: 2560 },
+      { label: '3200',  value: 3200 },
+      { label: '3840',  value: 3840 },
     ],
   },
   {
@@ -170,14 +207,17 @@ const W       = 1280;
 const PAD     = 44;
 const HEADER  = 108;
 const ROW_H   = 96;
-const FOOTER_H = 104;
-const H       = HEADER + ROWS.length * ROW_H + FOOTER_H;
+/** 状态条：字大、背景深，头显里才看得清（之前 22px 的小字完全没法读） */
+const STATUS_H = 88;
+const FOOTER_H = 100;
+const H       = HEADER + ROWS.length * ROW_H + STATUS_H + FOOTER_H;
 const CHIP_X  = 520;
 const CHIP_W  = W - PAD - CHIP_X;
 const RESET_W = 260;
 const RESET_H = 62;
 const RESET_X = W - PAD - RESET_W;
-const FOOTER_Y = HEADER + ROWS.length * ROW_H;
+const STATUS_Y = HEADER + ROWS.length * ROW_H;
+const FOOTER_Y = STATUS_Y + STATUS_H;
 const RESET_Y = FOOTER_Y + (FOOTER_H - RESET_H) / 2;
 
 type Target = { row: number; opt: number } | 'reset' | null;
@@ -281,8 +321,8 @@ export function createSettingsPanel(opts: SettingsOptions): SettingsHandle {
     ctx.font = '600 46px system-ui, -apple-system, sans-serif';
     ctx.fillText('画质设置', PAD, 62);
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = '400 28px system-ui, -apple-system, sans-serif';
-    ctx.fillText('指向选项扣扳机切换 · 长按摇杆关闭', PAD + 220, 62);
+    ctx.font = '400 30px system-ui, -apple-system, sans-serif';
+    ctx.fillText('指向选项扣扳机 · 再点「设置」按钮关闭', PAD + 260, 62);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.beginPath();
@@ -342,12 +382,16 @@ export function createSettingsPanel(opts: SettingsOptions): SettingsHandle {
       }
     }
 
-    // 实时状态：菜单挡住了银幕下方的 HUD，诊断信息挪到这儿来
+    // 实时状态条：深底 + 大字，头显里要能直接读出来。
+    // 菜单会挡住银幕下方的 HUD，所以诊断信息放在这里。
+    roundRect(ctx, PAD - 16, STATUS_Y + 8, W - (PAD - 16) * 2, STATUS_H - 16, 14);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fill();
     if (statusText) {
       ctx.textAlign = 'left';
-      ctx.fillStyle = 'rgba(145,255,180,0.8)';
-      ctx.font = '400 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-      ctx.fillText(statusText, PAD, FOOTER_Y + FOOTER_H / 2 + 9);
+      ctx.fillStyle = 'rgba(160,255,190,0.95)';
+      ctx.font = '500 34px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+      ctx.fillText(statusText, PAD + 10, STATUS_Y + STATUS_H / 2 + 12);
     }
 
     // 恢复默认

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:https": "HTTPS=1 vite",
     "build": "vite build",
     "preview": "vite preview",
     "smoke": "node scripts/smoke-run.mjs"

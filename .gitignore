@@ -5,6 +5,9 @@ yarn.lock
 
 # 构建输出
 dist/
+
+# 本地自签证书（dev:https 用）
+.cert/
 dist-ssr/
 *.local
 

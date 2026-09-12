@@ -286,24 +286,212 @@ export function Lightbox({
   }, [photo]);
 
   /* ---------- VR 影院 ---------- */
-  const [vrReady, setVrReady] = useState(false);
-  const [vrBusy,  setVrBusy]  = useState(false);
-  const [vrNote,  setVrNote]  = useState('');
+  const [vrReady,  setVrReady]  = useState(false);
+  const [vrWhy,    setVrWhy]    = useState('');
+  const [vrBusy,   setVrBusy]   = useState(false);
+  const [vrNote,   setVrNote]   = useState('');
+  /** VR 环境自检，直接显示在页面上：头显里看不了控制台，只能这样排查 */
+  const [vrDiag,   setVrDiag]   = useState('');
   const cinemaRef = useRef<CinemaHandle | null>(null);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const ok = navigator.xr
-        ? await navigator.xr.isSessionSupported('immersive-vr').catch(() => false)
-        : false;
-      if (alive) setVrReady(ok);
+      // WebXR 只在「安全上下文」里暴露。http://192.168.x.x:8000 这种局域网地址
+      // 不算安全上下文，navigator.xr 直接不存在 —— VR 按钮会整个不出现，
+      // 看不出原因，所以这里把原因记下来。
+      const secure = window.isSecureContext;
+      const hasXr = typeof navigator !== 'undefined' && Boolean(navigator.xr);
+      let supported: boolean | string = false;
+      if (hasXr) {
+        try {
+          supported = await navigator.xr!.isSessionSupported('immersive-vr');
+        } catch (e) {
+          supported = `检测异常:${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      if (!alive) return;
+      const proto = location.protocol;
+      setVrDiag(
+        `VR自检 ${proto} secure=${secure ? 'Y' : 'N'} xr=${hasXr ? 'Y' : 'N'} ` +
+        `immersive-vr=${String(supported)} ua=${navigator.userAgent.slice(0, 40)}`
+      );
+      if (!hasXr) {
+        setVrReady(false);
+        setVrWhy(secure ? '当前浏览器不支持 WebXR' : '页面不是安全上下文（需 HTTPS 或 localhost）');
+        return;
+      }
+      const ok = supported === true;
+      setVrReady(ok);
+      if (!ok) setVrWhy(`浏览器支持 WebXR，但没有检测到 VR 设备（${String(supported)}）`);
     })();
     return () => { alive = false; };
   }, []);
 
   // 关灯箱时顺手把 VR 会话收掉
   useEffect(() => () => cinemaRef.current?.stop(), []);
+
+  /* ---------- 键盘 / 手柄 ----------
+   * Pico 手柄在普通网页里通常会把摇杆、扳机翻译成键盘事件（方向键等），
+   * 也可能只走 Gamepad API。先把方向键 / 常用键接上；如果 Pico 发的不是这些，
+   * 加 ?keys=1 打开探针，屏幕左上角会显示实际收到的事件，照着补就行。
+   */
+  const probeRef = useRef<HTMLDivElement>(null);
+  const probeOn = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('keys') === '1';
+
+  // 轮询里要调最新的翻页回调，用 ref 镜像一份，免得闭包拿到旧值
+  const onPrevRef = useRef(onPrev);
+  const onNextRef = useRef(onNext);
+  useEffect(() => { onPrevRef.current = onPrev; onNextRef.current = onNext; }, [onPrev, onNext]);
+
+  /**
+   * 手柄轮询。
+   *
+   * Pico 手柄在普通网页里不发键盘事件（探针证实过），它就是一个标准
+   * Gamepad，得靠 navigator.getGamepads() 每帧轮询。
+   * 摇杆上下连续缩放、左右推一下翻一张，都用按下的「边沿」去抖。
+   */
+  useEffect(() => {
+    if (!photo) return;
+    let raf = 0;
+    let last = performance.now();
+    let prevBtns: boolean[] = [];
+    let xLatch = false;
+
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+      last = now;
+
+      const pads = navigator.getGamepads ? [...navigator.getGamepads()] : [];
+      const gp = pads.find(p => p && p.connected) as Gamepad | undefined;
+
+      if (probeRef.current) {
+        const gpLine = gp
+          ? `手柄: ${gp.id}\n轴 ${gp.axes.length}: [${[...gp.axes].map(v => v.toFixed(2)).join(', ')}]\n键: [${gp.buttons.map((b, i) => b.pressed ? i : '').filter(String).join(' ') || '无'}]`
+          : `没检测到手柄（插槽 ${pads.length}）`;
+        // 事件历史单独一行，免得被每帧刷新的手柄状态覆盖掉
+        const ev = probeLog.current.length
+          ? `\n事件: ${probeLog.current.join(' | ')}`
+          : '\n事件: （还没收到任何输入事件）';
+        probeRef.current.textContent = gpLine + ev;
+      }
+      if (!gp) return;
+
+      // 摇杆：xr-standard 是 axes[2]/[3]，只有 2 个轴时退回 [0]/[1]
+      const a = gp.axes;
+      const ax = a.length >= 4 ? a[2] : a[0] ?? 0;
+      const ay = a.length >= 4 ? a[3] : a[1] ?? 0;
+
+      // 上下：连续缩放
+      if (Math.abs(ay) > 0.15) zoomAt(Math.exp(-ay * 2.2 * dt), 0, 0);
+
+      // 左右：推一下翻一张，回中后才能再翻
+      if (Math.abs(ax) > 0.6) {
+        if (!xLatch) {
+          xLatch = true;
+          if (ax < 0) onPrevRef.current?.(); else onNextRef.current?.();
+        }
+      } else if (Math.abs(ax) < 0.35) {
+        xLatch = false;
+      }
+
+      // 按键：A/B 翻页，扳机/握持 缩放
+      const btns = gp.buttons.map(b => Boolean(b?.pressed));
+      for (let i = 0; i < btns.length; i++) {
+        if (!btns[i] || prevBtns[i]) continue;
+        if (i === 4) onPrevRef.current?.();
+        else if (i === 5) onNextRef.current?.();
+        else if (i === 0 || i === 7) zoomAt(1.3, 0, 0);
+        else if (i === 1 || i === 6) zoomAt(1 / 1.3, 0, 0);
+        else if (i === 3) setView(FIT);
+      }
+      prevBtns = btns;
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [photo, zoomAt]);
+
+  /**
+   * 全事件探针：把 keydown / wheel / pointerdown / gamepadconnected 都打出来。
+   * 摇杆左右既然能翻页，说明输入一定以某种形式到了页面，只是不是我以为的那种。
+   */
+  /** 探针收到的事件历史 */
+  const probeLog = useRef<string[]>([]);
+  useEffect(() => {
+    if (!probeOn) return;
+    const log = (s: string) => {
+      // 只留最近 6 条，避免框太长
+      probeLog.current = [...probeLog.current.slice(-5), s];
+      console.log('[probe]', s);
+    };
+    const onKey = (e: KeyboardEvent) =>
+      log(`keydown key=${e.key} code=${e.code} keyCode=${e.keyCode} repeat=${e.repeat}`);
+    const onWheel = (e: WheelEvent) =>
+      log(`wheel dx=${e.deltaX} dy=${e.deltaY} mode=${e.deltaMode}`);
+    const onDown = (e: PointerEvent) =>
+      log(`pointerdown type=${e.pointerType} btn=${e.button} pos=${Math.round(e.clientX)},${Math.round(e.clientY)}`);
+    const onGp = (e: GamepadEvent) => log(`gamepadconnected ${e.gamepad.id}`);
+    // capture: true —— 在捕获阶段就拿到，避免被中途 stopPropagation 吃掉
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('wheel', onWheel, true);
+    document.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('gamepadconnected', onGp, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('wheel', onWheel, true);
+      document.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('gamepadconnected', onGp, true);
+    };
+  }, [probeOn]);
+
+  useEffect(() => {
+    if (!photo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (probeRef.current) {
+        probeRef.current.textContent =
+          `key=${e.key} code=${e.code} keyCode=${e.keyCode}`;
+      }
+      switch (e.key) {
+        case 'ArrowUp':    e.preventDefault(); zoomAt(1.25, 0, 0); return;
+        case 'ArrowDown':  e.preventDefault(); zoomAt(1 / 1.25, 0, 0); return;
+        case 'ArrowLeft':  e.preventDefault(); onPrev(); return;
+        case 'ArrowRight': e.preventDefault(); onNext(); return;
+        case 'i': case 'I':
+          e.preventDefault();
+          setView(FIT); setInfoOpen(v => !v); return;
+        case 'Escape':
+          e.preventDefault();
+          if (viewRefState.current.s > 1) setView(FIT);
+          else requestClose();
+          return;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [photo, zoomAt, onPrev, onNext, requestClose, setInfoOpen]);
+
+  /** 以视口中心为锚点逐级缩放，给屏幕按钮用 */
+  const zoomStep = useCallback((factor: number) => {
+    const box = viewRef.current?.getBoundingClientRect();
+    zoomAt(factor, box ? box.left + box.width / 2 : 0, box ? box.top + box.height / 2 : 0);
+  }, [zoomAt]);
+  const zoomIn  = useCallback(() => zoomStep(1.35), [zoomStep]);
+  const zoomOut = useCallback(() => zoomStep(1 / 1.35), [zoomStep]);
+
+  const enterVrDiagnose = async () => {
+    let text = `VR 不可用：${vrWhy}`;
+    if (!window.isSecureContext) {
+      text += `\n\n当前地址：${location.href}`;
+      text += '\n\nWebXR 要求 HTTPS 或 localhost。请用以下任一方式打开：';
+      text += '\n· npm run dev:https（自签证书，头显里信任即可）';
+      text += '\n· adb reverse tcp:8000 tcp:8000 后用 http://localhost:8000';
+      text += '\n· 部署到 Cloud Studio 等带 HTTPS 的环境';
+    }
+    window.alert(text);
+  };
 
   const enterVr = async () => {
     if (vrBusy || cinemaRef.current) return;
@@ -321,7 +509,9 @@ export function Lightbox({
       });
       setVrNote('');
     } catch (e) {
-      setVrNote(String(e instanceof Error ? e.message : e) || '进入 VR 失败');
+      console.error('[vr] 进入 VR 失败', e);
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      setVrNote(msg || '进入 VR 失败');
     } finally {
       setVrBusy(false);
     }
@@ -470,6 +660,8 @@ export function Lightbox({
   if (!photo) return null;
 
   const rows = liveExif ? exifRows(liveExif) : [];
+  // VR 里没控制台，把上次进 VR 的时间线日志读出来，显示在信息面板最上面
+  const vrTrace = (window as unknown as { __vrTrace?: string[] }).__vrTrace;
   const zoomed = view.s > 1;
 
   return (
@@ -490,6 +682,12 @@ export function Lightbox({
         <img key={`bd-${photo.id}`} src={backdropUrl(photo.src)} alt="" className="lb__backdrop-img" />
         <div className="lb__backdrop-veil" />
       </div>
+      {/* 排查手柄按键用的临时探针，只有 ?keys=1 才显示 */}
+      {probeOn && (
+        <div ref={probeRef} className="lb__probe">
+          请按手柄按键 / 推摇杆…
+        </div>
+      )}
       <div
         ref={viewRef}
         className="lb__view"
@@ -514,7 +712,7 @@ export function Lightbox({
             </svg>
           </button>
         )}
-        {vrReady && (
+        {vrReady ? (
           <button
             className="lb__vr"
             onClick={() => void enterVr()}
@@ -529,7 +727,20 @@ export function Lightbox({
               <circle cx="15.6" cy="10.6" r="1.7" />
             </svg>
           </button>
-        )}
+        ) : vrWhy ? (
+          <button
+            className="lb__vr lb__vr--off"
+            onClick={() => void enterVrDiagnose()}
+            aria-label="VR 不可用，点击查看原因"
+            title={vrWhy}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2.6 9.4a2.4 2.4 0 0 1 2.4-2.4h14a2.4 2.4 0 0 1 2.4 2.4v2.2a4.4 4.4 0 0 1-4.4 4.4h-.9l-1.4 2.2H9.3L7.9 16h-.9a4.4 4.4 0 0 1-4.4-4.4z" />
+              <line x1="4" y1="4" x2="20" y2="20" />
+            </svg>
+          </button>
+        ) : null}
         <div className="lb__stage">
           {!loaded && <div className="lb__placeholder" />}
           <img
@@ -554,12 +765,18 @@ export function Lightbox({
             onClick={toggleInfo}
           />
         </div>
-        {zoomed && (
-          <div className="lb__zoom">
-            <span>{Math.round(view.s * 100)}%</span>
-            <button onClick={() => setView(FIT)}>复位</button>
-          </div>
-        )}
+        {/*
+          常驻缩放控件。
+          Pico 手柄在网页里只表现为一个指针：横向拖动能触发翻页手势，
+          但缩放要双指捏合，单指针永远触发不了。而手柄按键又不向 2D 网页暴露，
+          所以只能靠屏幕按钮 —— 点击手势是唯一确定可用的输入。
+        */}
+        <div className="lb__zoom" onPointerDown={e => e.stopPropagation()}>
+          <button onClick={zoomOut} disabled={!zoomed} aria-label="缩小">－</button>
+          <span>{Math.round(view.s * 100)}%</span>
+          <button onClick={zoomIn} aria-label="放大">＋</button>
+          <button onClick={() => setView(FIT)} disabled={!zoomed} aria-label="复位">复位</button>
+        </div>
         {hasPrev && (
           <button className="lb__nav lb__nav--prev" onClick={onPrev} aria-label="上一张">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -592,7 +809,13 @@ export function Lightbox({
         )}
       </div>
 
-      {vrNote && <p className="lb__vr-note">{vrNote}</p>}
+      {(vrNote || vrDiag) && (
+        <p className="lb__vr-note" style={{ maxWidth: 'calc(100% - 32px)' }}>
+          {vrDiag}
+          {vrDiag && vrNote ? '\n' : ''}
+          {vrNote}
+        </p>
+      )}
 
       {infoOpen && (
         <aside className="lb__panel" aria-label="拍摄信息">
@@ -605,6 +828,12 @@ export function Lightbox({
             </button>
           </div>
           <div className="lb__panel-body">
+            {vrTrace && vrTrace.length > 0 && (
+              <div className="lb__trace">
+                <div className="lb__trace-kicker">VR 启动时间线（调试）</div>
+                {vrTrace.map((t, i) => <div key={i}>{t}</div>)}
+              </div>
+            )}
             <h2 className="lb__panel-title">{photo.title}</h2>
             {(photo.location || photo.year) && (
               <p className="lb__panel-sub">

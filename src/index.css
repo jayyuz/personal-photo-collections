@@ -145,14 +145,28 @@ a       { color: inherit; text-decoration: none; }
 .lb__vr:hover:not(:disabled) { color: #FFF; background: rgba(255,255,255,0.14); }
 .lb__vr:disabled { opacity: 0.5; cursor: progress; }
 .lb__vr:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
-.lb__vr-note { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 40px); padding: 9px 16px; border-radius: 10px; font-size: 0.75rem; letter-spacing: 0.04em; color: rgba(240,240,240,0.85); background: rgba(10,10,10,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.09); animation: lbFade 0.2s var(--ease-out); }
+/* VR 启动时间线（调试用） */
+.lb__trace { margin-bottom: 16px; padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); font: 400 12px/1.7 ui-monospace, Menlo, Consolas, monospace; color: rgba(160,255,190,0.9); white-space: pre-wrap; word-break: break-all; }
+.lb__trace-kicker { margin-bottom: 4px; font-weight: 600; color: rgba(255,255,255,0.55); letter-spacing: 0.08em; }
+
+/* 手柄按键探针（?keys=1） */
+.lb__probe { position: fixed; top: 12px; left: 12px; z-index: 999; padding: 10px 14px; border-radius: 8px; font: 500 15px/1.5 ui-monospace, Menlo, Consolas, monospace; color: #9f9; background: rgba(0,0,0,0.82); border: 1px solid rgba(255,255,255,0.18); pointer-events: none; white-space: pre; }
+
+/* VR 不可用：划掉的眼镜图标，点一下说明原因 */
+.lb__vr--off { opacity: 0.4; }
+.lb__vr--off:hover { color: #FFF; background: rgba(255,255,255,0.14); opacity: 0.7; }
+.lb__vr-note { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); z-index: 6; max-width: calc(100% - 40px); padding: 9px 16px; border-radius: 10px; font-size: 0.75rem; letter-spacing: 0.04em; color: rgba(240,240,240,0.85); background: rgba(10,10,10,0.72); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.14); animation: lbFade 0.2s var(--ease-out); white-space: pre-wrap; word-break: break-all; line-height: 1.7; }
 .lb__close { position: absolute; top: 20px; right: 20px; z-index: 2; color: rgba(240,240,240,0.6); padding: 10px; transition: color 0.15s, transform 0.2s, background 0.2s; border-radius: 50%; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); animation: lbFade 0.3s ease 0.14s backwards; }
 .lb__close:hover { color: #FFF; transform: rotate(90deg) scale(1.1); background: rgba(255,255,255,0.14); }
 .lb__close:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
-.lb__stage { width: 100%; display: flex; align-items: center; justify-content: center; max-height: 88dvh; position: relative; }
+/* 用 svh（小视口高度）而不是 dvh：Pico 浏览器上 dvh 会算得偏高，
+   竖图按这个高度去撑就会顶出可视区、上下被切掉。svh 取的是地址栏展开时的
+   最小高度，更保守也更稳；后面再跟一条 vh 兜底给不支持 svh 的老浏览器。 */
+.lb__stage { width: 100%; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; max-height: 84svh; max-height: 84vh; position: relative; }
 .lb__placeholder { width: 480px; height: 600px; max-width: 100%; max-height: 80dvh; border-radius: 5px; background: rgba(255,255,255,0.05); animation: sk 1.6s linear infinite; }
 /* 画廊装裱效果：mat（卡纸衬板）+ 木质画框 + 墙面投影，全用 box-shadow 不占布局 */
-.lb__img { max-width: calc(100% - 20px); max-height: calc(88dvh - 20px); object-fit: contain; opacity: 0; cursor: pointer; border-radius: 3px; will-change: transform; user-select: none; -webkit-user-drag: none; transition: opacity 0.5s var(--ease-out), transform 0.22s var(--ease-out), box-shadow 0.3s var(--ease-out); box-shadow:
+/* 宽高都按视口约束，object-fit: contain 会保证按比例完整显示、不裁切 */
+.lb__img { max-width: calc(100% - 20px); max-height: 84svh; max-height: 84vh; object-fit: contain; opacity: 0; cursor: pointer; border-radius: 3px; will-change: transform; user-select: none; -webkit-user-drag: none; transition: opacity 0.5s var(--ease-out), transform 0.22s var(--ease-out), box-shadow 0.3s var(--ease-out); box-shadow:
   /* ① 照片边缘 — 极细暗线，模拟冲印裁切边 */
   0 0 0 1px rgba(0,0,0,0.12),
   /* ② Mat / 卡纸衬板 — 渐变感通过两层不同色温叠出 */
@@ -184,10 +198,15 @@ a       { color: inherit; text-decoration: none; }
   animation: none; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
 /* 缩不回卡片（放大着、或卡片已经滚出屏幕）时退而求其次，整块淡出 */
 .lb--fade { opacity: 0; pointer-events: none; transition: opacity 0.22s ease; }
-.lb__zoom { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; align-items: center; gap: 12px; padding: 7px 8px 7px 14px; border-radius: 999px; font-size: 0.75rem; letter-spacing: 0.06em; color: rgba(240,240,240,0.75); background: rgba(10,10,10,0.42); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.09); animation: lbFade 0.2s var(--ease-out); }
+/* 常驻缩放条：放右上角，和关闭/信息/VR 同一排。
+   放底部会占掉竖向空间，竖图就得更矮，不划算。 */
+.lb__zoom { position: absolute; top: 20px; right: 164px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 999px; font-size: 0.8125rem; letter-spacing: 0.06em; color: rgba(240,240,240,0.8); background: rgba(10,10,10,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); animation: lbFade 0.2s var(--ease-out); }
 @keyframes lbFade { from { opacity: 0; } to { opacity: 1; } }
-.lb__zoom button { padding: 3px 12px; border-radius: 999px; font-size: 0.75rem; color: rgba(240,240,240,0.85); background: rgba(255,255,255,0.1); transition: background 0.15s, color 0.15s; }
-.lb__zoom button:hover { color: #FFF; background: rgba(255,255,255,0.2); }
+.lb__zoom span { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.lb__zoom button { min-width: 44px; padding: 9px 14px; border-radius: 999px; font-size: 0.9375rem; color: rgba(240,240,240,0.9); background: rgba(255,255,255,0.12); transition: background 0.15s, color 0.15s, opacity 0.15s; }
+.lb__zoom button:hover:not(:disabled) { color: #FFF; background: rgba(255,255,255,0.26); }
+.lb__zoom button:disabled { opacity: 0.3; cursor: default; }
+.lb__zoom button:focus-visible { outline: 1px solid #FFF; outline-offset: 3px; }
 .lb__nav { position: absolute; top: 50%; transform: translateY(-50%); color: rgba(240,240,240,0.55); padding: 14px; border-radius: 50%; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: color 0.2s, background 0.2s; animation: lbFade 0.3s ease 0.14s backwards; }
 .lb__nav:hover { color: #FFF; background: rgba(255,255,255,0.14); }
 .lb__nav:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
@@ -199,7 +218,7 @@ a       { color: inherit; text-decoration: none; }
   /* 上下留出操作区，图片就不会被按钮压住 */
   .lb__view { padding: 64px 12px 84px; }
   .lb__stage { max-height: 100%; }
-  .lb__img { max-width: calc(100% - 14px); max-height: calc(100% - 14px); box-shadow:
+  .lb__img { max-width: calc(100% - 14px); max-height: 100%; box-shadow:
     0 0 0 1px rgba(0,0,0,0.12),
     0 0 0 2px rgba(252,250,246,0.98),
     0 0 0 8px rgba(246,242,235,0.97),
@@ -214,7 +233,8 @@ a       { color: inherit; text-decoration: none; }
   .lb__nav--prev { left: calc(50% - 58px); }
   .lb__nav--next { right: auto; left: calc(50% + 12px); }
   /* 放大时底部是缩放指示条，信息面板打开时底部是面板，都别和翻页按钮打架 */
-  .lb--zoom .lb__nav, .lb--info .lb__nav { opacity: 0; pointer-events: none; }
+  /* 翻页按钮保持可用：Pico 上点击是唯一确定可用的输入，放大时也要能翻页 */
+  .lb--info .lb__nav { opacity: 0; pointer-events: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -429,7 +449,7 @@ a       { color: inherit; text-decoration: none; }
 .lb__similar-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .lb__similar-thumb:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(255,255,255,0.55); }
 .lb__similar-thumb:focus-visible { outline: 1px solid #FFF; outline-offset: 2px; }
-/* 给这一排让出位置，画框别压在上面 */
+/* 缩放条挪到右上角后，底部只剩相似排，用回原来的间距 */
 .lb--similar .lb__view { padding-bottom: 104px; }
 /* 放大是为了看细节，这时候和缩放条抢底部位置没意义；退场时跟着一起消失 */
 .lb--zoom .lb__similar, .lb--closing .lb__similar { opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
@@ -439,6 +459,8 @@ a       { color: inherit; text-decoration: none; }
   .lb__similar { bottom: 72px; gap: 6px; padding: 6px 10px 6px 12px; }
   .lb__similar-thumb { width: 38px; height: 38px; }
   .lb--similar .lb__view { padding-bottom: 138px; }
+  /* 窄屏顶部排不下四个按钮，缩放条改回底部中间（那里本来就有翻页按钮） */
+  .lb__zoom { top: auto; right: auto; bottom: 18px; left: 50%; transform: translateX(-50%); }
   .lb--info .lb__similar { opacity: 0; pointer-events: none; }
 }
 

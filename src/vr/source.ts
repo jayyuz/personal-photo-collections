@@ -22,11 +22,20 @@ export function cloudinaryVariant(src: string, width: number, quality: number): 
 }
 
 /**
- * VR 银幕主图：按最长边限制，避免竖图因为只限制宽度而超过 WebGL 最大纹理。
+ * VR 银幕主图：取原图（不做任何缩放变换）。
  *
- * 关键是 size 要贴着「这张图在头显面板上实际占多少像素」来取，而不是一味往大要：
- * 交给 Cloudinary 做 Lanczos 下采样 + 轻锐化，比下载一张巨图再让 GPU
- * 用 mipmap（盒式滤波）缩下去清晰得多，下载量也小一个量级。
+ * 之前按「照片在屏幕上占多少像素」动态算尺寸，结果测量在部分设备上不稳，
+ * 一路算出 512px 的图去填上千像素的位置 —— 糊是必然的。
+ * 既然 CDN 上的原图就是高分辨率，直接取原图最省事：省掉整条测量链路，
+ * 也不会再有「算错尺寸」这类问题。代价只是流量大一些。
+ */
+export function cloudinaryOriginal(src: string, quality: number): string {
+  return cloudinaryTransform(src, `f_auto,q_${quality}`);
+}
+
+/**
+ * 按最长边限制取图（备用模式）。
+ * 只在「确实要省流量」或「原图超过 GPU 纹理上限」时才有意义。
  */
 export function cloudinaryFit(
   src: string,
