@@ -15,6 +15,10 @@
 import * as THREE from 'three';
 import { createPicker, type PickerHandle } from './picker';
 import { cloudinaryFit, MAX_CLOUDINARY_SIDE } from './source';
+import {
+  createSettingsPanel, loadSettings, saveSettings,
+  type SettingsHandle, type VrSettings,
+} from './settings';
 
 export interface VrPhoto {
   src: string;
@@ -43,20 +47,17 @@ const CFG = {
   zoomSpeed: 1.5,
   hud:       { w: 7.2, y: 0.15, z: -9.4, tilt: -0.12 },
   exitHoldMs: 900,
+  /** 长按摇杆多久算「打开设置」而不是「复位」 */
+  menuHoldMs: 600,
+  /** 设置面板：摆在视线下方，调的时候银幕还看得见 */
+  settings:  { width: 1.6, dist: 1.9, dropY: -0.5, tilt: 0.34 },
 
-  /* ---------- 画质 ---------- */
-  // three 默认 foveation = 1（边缘低分辨率），银幕铺满视野时正好糊在边缘上，关掉
-  foveation:   0,
-  // 没有原生合成层时，眼缓冲就是画质瓶颈：它是一张覆盖 ~105° 的透视贴图，
-  // 中心角分辨率只有面板的 ~1/panelBoost。把渲染倍率往上顶，把中心密度提到面板水平。
-  eyeBoost:    1.35,
+  /* ---------- 画质 ----------
+   * 用户能在 VR 设置面板里改的项都在 settings.ts；这里只放不需要调的常量。 */
   // 拿不到头显原生倍率时的兜底值
   renderScale: 1.4,
   // 眼缓冲中心密度 × panelBoost ≈ 面板密度。只有原生合成层（直接按面板采样）才用得上。
   panelBoost:  1.5,
-  // 纹理比实际采样率略大一点，避免正好卡在 1:1 边界上；
-  // 注意别调大：超过 1 的部分就是缩小采样，正是摩尔纹的来源。
-  superSample: 1.06,
   // 纹理尺寸量化到 128 的整数倍：既贴近实际占位，又能让 URL 稳定命中 CDN 缓存。
   // 不能用粗档位（1024/1408/…）—— 占位 1000px 却抓 1408px，等于常驻 1.4× 缩小采样，
   // mipmap 一介入就发虚，正好是要避免的那件事。
@@ -65,9 +66,6 @@ const CFG = {
   refetchRatio: 1.2,
   // q_auto 在大屏上压得太狠，明确给高质量
   quality:     88,
-  // 服务端下采样后补一点锐度。这个值不能大：锐化会把能量堆到 Nyquist 附近，
-  // 一旦有任何缩小采样就直接变成摩尔纹。
-  sharpen:     25,
 
   /** 悬浮照片墙 */
   picker: {
@@ -136,20 +134,18 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     return Number.isFinite(v) && v >= min && v <= max ? v : null;
   };
 
-  const tryNativeLayers = params.get('vrLayers') !== '0';
-  // 银幕的视角大小是清晰度最直接的杠杆：缩小 = 同样的像素铺更小的角度 = 更实。
-  // 挂 ?vrScreen=0.75 可以在头显里直接对比，不用改代码重新部署。
-  const screenScale = numParam('vrScreen', 0.4, 1.2) ?? 1;
-  const SCREEN_W = CFG.screen.w * screenScale;
-  const SCREEN_H = CFG.screen.h * screenScale;
-  const PHOTO_MAX_W = CFG.photo.maxW * screenScale;
-  const PHOTO_MAX_H = CFG.photo.maxH * screenScale;
+  // 画质参数以设置面板（localStorage）为准；URL 参数仍可临时覆盖，方便对拍。
+  const settings: VrSettings = loadSettings();
+  const urlScreen = numParam('vrScreen', 0.4, 1.2);
+  if (urlScreen !== null) settings.screenScale = urlScreen;
+  const urlScale = numParam('vrScale', 0.5, 2);
+  if (urlScale !== null) settings.renderScale = urlScale;
+  if (params.get('vrLayers') === '0') settings.useLayers = false;
 
-  const optionalFeatures = ['local-floor', 'bounded-floor', 'hand-tracking'];
-  if (tryNativeLayers) optionalFeatures.push('layers');
-
+  // layers 这个 feature 必须在建会话时就申请，否则中途在面板里打开也用不了。
+  // 申请到只是「可用」，真正用不用由 settings.useLayers 决定。
   const session = await navigator.xr!.requestSession('immersive-vr', {
-    optionalFeatures,
+    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
   });
 
   const scene = new THREE.Scene();
@@ -164,24 +160,26 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  // 关掉固定注视点渲染，整块银幕都按全分辨率画
-  renderer.xr.setFoveation(CFG.foveation);
+  renderer.xr.setFoveation(settings.foveation);
 
-  // 会不会走原生合成层，进 session 就能判断 —— 这决定了渲染倍率怎么取。
-  // 必须在 setSession 之前定下来：base layer 一旦建好，倍率就改不动了。
-  const layersEnabled = Boolean(
-    tryNativeLayers &&
+  // 设备到底给不给原生合成层，进 session 就能判断。
+  const layersAvailable = Boolean(
     session.enabledFeatures?.includes('layers') &&
     typeof XRWebGLBinding !== 'undefined'
   );
+  const layersEnabled = layersAvailable && settings.useLayers;
 
   const nativeScale = nativeScaleOf(session);
   const scaleBase = nativeScale > 1 ? nativeScale : CFG.renderScale;
   // 有原生合成层：照片不经过眼缓冲，按原生渲染就够，多给只是白烧 GPU。
   // 没有合成层：照片要经眼缓冲重采样，而眼缓冲中心密度低于面板，
   // 这时超采样是唯一能真正提清晰度的手段，值得付这份 GPU。
-  const framebufferScale = numParam('vrScale', 0.5, 2)
-    ?? Math.min(2, layersEnabled ? scaleBase : scaleBase * CFG.eyeBoost);
+  // 必须在 setSession 之前定下来：base layer 一旦建好，倍率就改不动了
+  // —— 所以设置面板里改「超采样」要重进 VR 才生效。
+  const framebufferScale = Math.min(
+    2,
+    layersEnabled ? scaleBase : scaleBase * settings.renderScale
+  );
   renderer.xr.setFramebufferScaleFactor(framebufferScale);
 
   // local-floor 拿不到就退回 local，至少能进得去
@@ -203,7 +201,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     return Math.min(maxSourceSide, v);
   };
   const vrSource = (src: string, size: number) =>
-    cloudinaryFit(src, Math.min(size, maxSourceSide), CFG.quality, CFG.sharpen);
+    cloudinaryFit(src, Math.min(size, maxSourceSide), CFG.quality, settings.sharpen);
 
   /* ---------- 放映厅 ---------- */
   // 放映厅几乎铺满整个视野，用 PBR（MeshStandardMaterial）画等于按原生分辨率
@@ -240,26 +238,21 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   glow.position.set(0, CFG.screen.y, CFG.screen.z + 3);
   scene.add(glow);
 
-  /* ---------- 银幕 ---------- */
-  const frame = new THREE.Mesh(
-    new THREE.PlaneGeometry(SCREEN_W + 0.5, SCREEN_H + 0.5),
-    new THREE.MeshBasicMaterial({ color: 0x000000 })
-  );
+  /* ---------- 银幕 ----------
+   * 全部用 1×1 平面 + scale：银幕大小要能在设置面板里实时改。 */
+  const unitQuad = new THREE.PlaneGeometry(1, 1);
+
+  const frame = new THREE.Mesh(unitQuad, new THREE.MeshBasicMaterial({ color: 0x000000 }));
   frame.position.set(0, CFG.screen.y, CFG.screen.z - 0.05);
   scene.add(frame);
 
-  const border = new THREE.Mesh(
-    new THREE.PlaneGeometry(SCREEN_W + 0.9, SCREEN_H + 0.9),
-    new THREE.MeshBasicMaterial({ color: 0x1a1a1d })
-  );
+  const border = new THREE.Mesh(unitQuad, new THREE.MeshBasicMaterial({ color: 0x1a1a1d }));
   border.position.set(0, CFG.screen.y, CFG.screen.z - 0.08);
   scene.add(border);
 
-  // 1×1 的平面，靠 scale 适配各种宽高比
   const photoMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-  const photo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), photoMat);
+  const photo = new THREE.Mesh(unitQuad, photoMat);
   photo.position.set(0, CFG.screen.y, CFG.screen.z);
-  photo.scale.set(PHOTO_MAX_W, PHOTO_MAX_H, 1);
   scene.add(photo);
 
   /* ---------- 银幕下方的信息条 ---------- */
@@ -337,6 +330,27 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   /** 银幕张开的水平弧度 */
   const screenRad = (w: number) => 2 * Math.atan(w / 2 / Math.abs(CFG.screen.z));
 
+  /** 当前照片的宽高比，改银幕大小时要靠它重算 */
+  let photoAspect = 3 / 2;
+
+  /**
+   * 按 settings.screenScale 重排银幕。
+   * 银幕变小 → 占位变小 → 需要的纹理也变小，调用方记得触发一次重取，
+   * 否则会留着一张过大的纹理常驻缩小采样（= 摩尔纹）。
+   */
+  const relayoutScreen = () => {
+    const s = settings.screenScale;
+    frame.scale.set(CFG.screen.w * s + 0.5, CFG.screen.h * s + 0.5, 1);
+    border.scale.set(CFG.screen.w * s + 0.9, CFG.screen.h * s + 0.9, 1);
+
+    let w = CFG.photo.maxW * s;
+    let h = w / photoAspect;
+    const maxH = CFG.photo.maxH * s;
+    if (h > maxH) { h = maxH; w = h * photoAspect; }
+    photo.scale.set(w, h, 1);
+    if (photoLayerImage) syncPhotoLayer(photoLayerImage, w, h);
+  };
+
   /**
    * 宽 w 米的画面横跨多少像素。
    * forPanel=true 用于原生合成层（按面板密度），否则按眼缓冲实测密度。
@@ -368,17 +382,24 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   let photoLayerDirty = false;
   let layerPainter: PhotoLayerPainter | null = null;
   let layersUsable = layersEnabled && Boolean(session.renderState.layers);
-  let layerStatus = !tryNativeLayers
-    ? 'URL 指定 ?vrLayers=0，强制走 3D Plane'
-    : layersUsable
-      ? '等待创建 XRQuadLayer'
-      : '设备/浏览器未提供 WebXR Layers，已按 3D Plane 路径优化';
+  let layerStatus = !layersAvailable
+    ? '设备/浏览器未提供 WebXR Layers，已按 3D Plane 路径优化'
+    : !settings.useLayers
+      ? '已在设置里关闭原生合成层'
+      : layersUsable
+        ? '等待创建 XRQuadLayer'
+        : 'renderState.layers 不可用，走 3D Plane';
   let sourcePixels = { w: 0, h: 0 };
   let diagnosticsVersion = 0;
+  /**
+   * 照片墙 / 设置面板是否打开。
+   * 合成层不参与深度测试，会盖穿这些面板，所以它们开着时必须压住合成层
+   * —— 包括后台换图完成时的自动重挂。
+   */
+  let overlayOpen = false;
   /** 平滑后的帧时长，用来看有没有掉帧（掉帧会触发重投影，整幅画面拖影） */
   let frameMs = 0;
 
-  const layerFeature = session.enabledFeatures?.includes('layers') ? 'enabled' : 'not requested/reported';
   const bumpDiagnostics = () => { diagnosticsVersion++; };
 
   const sizeText = (s: { w: number; h: number }) => s.w > 0 && s.h > 0 ? `${s.w}x${s.h}` : 'n/a';
@@ -412,8 +433,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       `VR显示路径: ${mode} | 原因: ${layerStatus}`,
       `源图: ${sizeText(sourcePixels)} | 银幕占位: ${foot}px | 采样比: ${ratio}（1.0 最佳，>1 摩尔纹，<1 发虚）`,
       `眼缓冲密度: ${eyeDeg.toFixed(1)} px/° | renderScale: ${framebufferScale.toFixed(2)} (原生 ${nativeScale.toFixed(2)}) | XR Base: ${baseLayerText()}`,
-      `帧时: ${frameMs.toFixed(1)}ms${frameMs > 14 ? ' ⚠掉帧→重投影拖影' : ''} | 档位: ${loadedStep || 'n/a'} | zoom: ${zoom.toFixed(2)}x | 银幕: ${screenScale.toFixed(2)}x`,
-      `features.layers: ${layerFeature} | QuadLayer: ${sizeText(photoLayerPixels)} | 可调: ?vrScreen= ?vrScale= ?vrLayers=0`,
+      `帧时: ${frameMs.toFixed(1)}ms${frameMs > 14 ? ' ⚠掉帧→重投影拖影' : ''} | 档位: ${loadedStep || 'n/a'} | zoom: ${zoom.toFixed(2)}x`,
+      `银幕 ${settings.screenScale.toFixed(2)}x · 余量 ${settings.superSample} · 锐化 ${settings.sharpen} · mip ${settings.mipmaps ? '开' : '关'} | 长按摇杆开设置`,
     ];
   };
 
@@ -492,6 +513,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   };
 
   const setPhotoLayerInRenderState = (visible: boolean) => {
+    // 有面板开着就一律不挂，等面板关了再说
+    if (visible && overlayOpen) return;
     if (!photoLayer || !session.renderState.layers || photoLayerInState === visible) return;
     const layers = session.renderState.layers.filter(layer => layer !== photoLayer);
     // renderState.layers 是「由后往前」的顺序：数组末尾才是最上层。
@@ -534,7 +557,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       // 开太小：直接糊。
       const pixelW = Math.max(
         512,
-        Math.min(maxTexSize, Math.round(footprintPx(w, true) * CFG.superSample))
+        Math.min(maxTexSize, Math.round(footprintPx(w, true) * settings.superSample))
       );
       const pixelH = Math.max(1, Math.min(maxTexSize, Math.round(pixelW * (h / w))));
       const binding = renderer.xr.getBinding();
@@ -683,14 +706,16 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
         : '摇杆上下 缩放 · 左右 翻页 · 扳机按住 拖动 · 摇杆按下 复位 · 长按侧键 退出');
     hudCtx.fillText(tip, w / 2, 118);
 
-    hudCtx.textAlign = 'left';
-    hudCtx.font = '400 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-    hudCtx.fillStyle = photoLayer && photoLayerInState
-      ? 'rgba(145,255,180,0.88)'
-      : 'rgba(255,204,128,0.88)';
-    const lines = diagnosticLines();
-    for (let i = 0; i < lines.length; i++) {
-      hudCtx.fillText(lines[i], 88, 174 + i * 38);
+    if (settings.diagnostics) {
+      hudCtx.textAlign = 'left';
+      hudCtx.font = '400 24px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+      hudCtx.fillStyle = photoLayer && photoLayerInState
+        ? 'rgba(145,255,180,0.88)'
+        : 'rgba(255,204,128,0.88)';
+      const lines = diagnosticLines();
+      for (let i = 0; i < lines.length; i++) {
+        hudCtx.fillText(lines[i], 88, 174 + i * 38);
+      }
     }
     hudTexture.needsUpdate = true;
   };
@@ -708,11 +733,11 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const prepare = (tex: THREE.Texture) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = maxAniso;
-    // mipmap 必须开着。纹理已经按实际采样率取，正常情况 LOD≈0、mipmap 不参与，
-    // 不损失细节；但视角一斜、头一动、或者刚好差一点点缩小采样时，
-    // 它就是唯一能挡住摩尔纹的东西。关掉 = 直接暴露原始采样噪声。
-    tex.generateMipmaps = true;
-    tex.minFilter  = THREE.LinearMipmapLinearFilter;
+    // mipmap 正常都该开着。纹理已经按实际采样率取，LOD≈0、mipmap 基本不参与，
+    // 不损失细节；但视角一斜、头一动、或刚好差一点点缩小采样时，
+    // 它是唯一能挡住摩尔纹的东西。设置面板里可以关掉，用来确认摩尔纹来源。
+    tex.generateMipmaps = settings.mipmaps;
+    tex.minFilter  = settings.mipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
     tex.magFilter  = THREE.LinearFilter;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.needsUpdate = true;
@@ -727,7 +752,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
    */
   const wantedStep = (): number => {
     const forPanel = Boolean(photoLayer && photoLayerInState);
-    return quantize(footprintPx(photo.scale.x, forPanel) * zoom * CFG.superSample);
+    return quantize(footprintPx(photo.scale.x, forPanel) * zoom * settings.superSample);
   };
 
   const adoptTexture = (tex: THREE.Texture, step: number) => {
@@ -739,16 +764,13 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     sourcePixels = { w: Math.round(img.width || 0), h: Math.round(img.height || 0) };
     bumpDiagnostics();
 
-    const aspect = img?.width && img?.height ? img.width / img.height : 3 / 2;
-    let w = PHOTO_MAX_W;
-    let h = w / aspect;
-    if (h > PHOTO_MAX_H) { h = PHOTO_MAX_H; w = h * aspect; }
-    photo.scale.set(w, h, 1);
-
+    photoAspect = img?.width && img?.height ? img.width / img.height : 3 / 2;
     photoMat.map = tex;
     photoMat.color.set(picker.isOpen() ? 0x2b2b2b : 0xffffff);
     photoMat.needsUpdate = true;
-    syncPhotoLayer(tex.image as TexImageSource, w, h);
+    photoLayerImage = tex.image as TexImageSource;
+    // 尺寸、合成层同步都在这里面做
+    relayoutScreen();
     photo.visible = !(photoLayer && photoLayerInState);
     apply();
   };
@@ -807,7 +829,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   /** 合成层按当前占位应该开多大 */
   const wantedLayerPx = () =>
-    Math.max(512, Math.min(maxTexSize, Math.round(footprintPx(photo.scale.x, true) * CFG.superSample)));
+    Math.max(512, Math.min(maxTexSize, Math.round(footprintPx(photo.scale.x, true) * settings.superSample)));
 
   /** 缩放到需要更多像素时，后台换一张更大的；换完保持当前的缩放和平移 */
   const refineSource = () => {
@@ -883,12 +905,102 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     const next = !picker.isOpen();
     if (next) placePickerInFrontOfHead();
     picker.setOpen(next);
+    overlayOpen = next;
     // 照片墙打开时压暗银幕，免得和缩略图抢注意力
     photoMat.color.set(next ? 0x2b2b2b : texture ? 0xffffff : 0x111111);
     setPhotoLayerInRenderState(!next);
     photo.visible = !(photoLayer && photoLayerInState);
     hud.visible = !next;
     drawHud();
+  };
+
+  /* ---------- 画质设置面板 ---------- */
+  const settingsPanel: SettingsHandle = createSettingsPanel({
+    settings,
+    width: CFG.settings.width,
+    dist:  CFG.settings.dist,
+    dropY: CFG.settings.dropY,
+    tilt:  CFG.settings.tilt,
+    layersAvailable,
+  });
+  scene.add(settingsPanel.group);
+
+  /** 按 settings.useLayers 决定挂不挂原生合成层 */
+  const applyLayerPreference = () => {
+    const want = layersAvailable && settings.useLayers;
+    if (!want) {
+      destroyPhotoLayer();
+      layersUsable = false;
+      layerStatus = layersAvailable
+        ? '已在设置里关闭原生合成层'
+        : '设备/浏览器未提供 WebXR Layers，已按 3D Plane 路径优化';
+      photo.visible = true;
+    } else if (!layersUsable) {
+      layersUsable = Boolean(session.renderState.layers);
+      layerStatus = layersUsable ? '重新启用原生合成层' : 'renderState.layers 不可用，走 3D Plane';
+      if (layersUsable && photoLayerImage) {
+        syncPhotoLayer(photoLayerImage, photo.scale.x, photo.scale.y);
+      }
+    }
+    bumpDiagnostics();
+  };
+
+  /**
+   * 把设置应用到运行中的场景。
+   * refetch=true 表示这次改动影响了「该下多大的图」，要重新取一张。
+   */
+  const applySettings = (refetch: boolean) => {
+    saveSettings(settings);
+    renderer.xr.setFoveation(settings.foveation);
+    if (texture) prepare(texture);
+    applyLayerPreference();
+    relayoutScreen();
+    // loadedStep 清零 → 主循环里的 refineSource 会按新参数重新评估该取多大
+    if (refetch) loadedStep = 0;
+    bumpDiagnostics();
+    drawHud();
+  };
+
+  /** 改了这些就得重下图：要么影响 URL，要么影响该下多大 */
+  const NEEDS_REFETCH: ReadonlySet<string> = new Set([
+    'screenScale', 'superSample', 'sharpen', 'useLayers', 'reset',
+  ]);
+
+  const toggleSettings = () => {
+    const next = !settingsPanel.isOpen();
+    if (next) {
+      if (picker.isOpen()) togglePicker();
+      const xrCamera = renderer.xr.getCamera();
+      xrCamera.updateMatrixWorld();
+      xrCamera.getWorldPosition(headPos);
+      xrCamera.getWorldDirection(headDir);
+      headDir.y = 0;
+      if (headDir.lengthSq() < 1e-4) headDir.set(0, 0, -1);
+      else headDir.normalize();
+      settingsPanel.placeInFrontOf(headPos, headDir);
+      settingsPanel.invalidate();
+    }
+    settingsPanel.setOpen(next);
+    overlayOpen = next;
+
+    // 原生合成层是「贴」在最上层的，不参与深度测试，会直接盖穿面板。
+    // 菜单打开期间退回 3D Plane，遮挡关系才正常（关掉菜单就恢复）。
+    setPhotoLayerInRenderState(!next);
+    photo.visible = !(photoLayer && photoLayerInState);
+    // 银幕下方的 HUD 正好被面板挡住，诊断信息改在面板底部显示
+    hud.visible = !next;
+    drawHud();
+  };
+
+  /** 面板底部那行实时状态，短到能塞进一行 */
+  const statusLine = (): string => {
+    const forPanel = Boolean(photoLayer && photoLayerInState);
+    const foot = footprintPx(photo.scale.x, forPanel);
+    const ratio = foot > 0 && sourcePixels.w > 0
+      ? (sourcePixels.w / (foot * zoom)).toFixed(2)
+      : '—';
+    const path = layersUsable ? 'QuadLayer' : '3D Plane';
+    return `采样比 ${ratio}（1.0 最佳） · 占位 ${foot}px · 源图 ${sourcePixels.w || '—'} · 帧时 ${frameMs.toFixed(1)}ms · ${path}`;
   };
 
   const pick = (i: number) => {
@@ -930,6 +1042,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     prev:  boolean[];
     latch: boolean;
     gripAt: number | null;
+    /** 摇杆按下的起始时刻：短按复位，长按开设置 */
+    stickAt: number | null;
     drag:   { u: number; v: number } | null;
     /** 照片墙：拖动时的起始朝向与累计角度 */
     dragYaw:   number | null;
@@ -942,7 +1056,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     let s = states.get(src);
     if (!s) {
       s = {
-        prev: [], latch: false, gripAt: null, drag: null,
+        prev: [], latch: false, gripAt: null, stickAt: null, drag: null,
         dragYaw: null, dragMoved: 0, latchX: false, latchY: false,
       };
       states.set(src, s);
@@ -955,6 +1069,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const readInput = (frame: XRFrame, now: number, dt: number) => {
     const pickerOpen = picker.isOpen();
     let hovered = false;
+    let hoveredSettings = false;
 
     for (const src of session.inputSources) {
       const gp = src.gamepad;
@@ -963,6 +1078,62 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       const { x: ax, y: ay } = stickAxes(gp as Gamepad);
       const btn = gp.buttons;
       const trigger = btn[0]?.pressed ?? false;
+
+      // 摇杆按下：短按复位，长按开 / 关设置面板。
+      // stickAt: null = 没按, >0 = 按下时刻, -1 = 长按已触发，按住不放也不再重复
+      const stick = btn[3]?.pressed ?? false;
+      if (stick) {
+        if (st.stickAt === null) {
+          st.stickAt = now;
+        } else if (st.stickAt > 0 && now - st.stickAt > CFG.menuHoldMs) {
+          st.stickAt = -1;
+          pulse(gp as Gamepad, 0.8, 60);
+          toggleSettings();
+          st.prev = btn.map(b => b.pressed);
+          continue;
+        }
+      } else if (st.stickAt !== null) {
+        // 松手时还没到长按阈值，那就是短按
+        if (st.stickAt > 0 && !settingsPanel.isOpen()) {
+          reset();
+          pulse(gp as Gamepad, 0.4, 30);
+        }
+        st.stickAt = null;
+      }
+
+      // 设置面板打开时，手柄只用来点选项。
+      // 这里必须读实时值：上面刚可能被另一只手柄（或本帧的长按）切过
+      if (settingsPanel.isOpen()) {
+        if (aim(src, frame)) {
+          if (settingsPanel.hover(raycaster)) hoveredSettings = true;
+          if (trigger && !st.prev[0]) {
+            const changed = settingsPanel.click(raycaster);
+            if (changed) {
+              pulse(gp as Gamepad, 0.6, 40);
+              applySettings(NEEDS_REFETCH.has(changed));
+              settingsPanel.setStatus(statusLine());
+              settingsPanel.invalidate();
+            }
+          }
+        }
+        // 侧键 / 菜单键：关掉面板；长按侧键仍然退出 VR
+        const gripS = btn[1]?.pressed ?? false;
+        if (gripS && st.gripAt === null) st.gripAt = now;
+        if (!gripS && st.gripAt !== null) {
+          if (now - st.gripAt < CFG.exitHoldMs) toggleSettings();
+          st.gripAt = null;
+        }
+        if (gripS && st.gripAt !== null && now - st.gripAt > CFG.exitHoldMs) {
+          pulse(gp as Gamepad, 1, 120);
+          void session.end();
+          return;
+        }
+        for (const b of CFG.menuButtons) {
+          if (btn[b]?.pressed && !st.prev[b]) toggleSettings();
+        }
+        st.prev = btn.map(b => b.pressed);
+        continue;
+      }
 
       // Pico 4 菜单键不是 xr-standard 的固定按钮，常见实现会放在 6/7。
       for (const b of CFG.menuButtons) {
@@ -1054,11 +1225,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
         st.drag = null;
       }
 
-      // 摇杆按下：复位
-      if ((gp.buttons[3]?.pressed ?? false) && !st.prev[3]) {
-        reset();
-        pulse(gp as Gamepad, 0.4, 30);
-      }
+      // 摇杆按下的复位在上面统一处理（要和长按开设置区分开）
+
       // A/B（xr-standard 的 4/5）也能翻页，方便不习惯摇杆的人
       if ((btn[4]?.pressed ?? false) && !st.prev[4]) showPhoto(index - 1);
       if ((btn[5]?.pressed ?? false) && !st.prev[5]) showPhoto(index + 1);
@@ -1067,6 +1235,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     }
 
     if (pickerOpen && !hovered) picker.setHover(null);
+    if (settingsPanel.isOpen() && !hoveredSettings) settingsPanel.clearHover();
   };
 
   /* ---------- 主循环 ---------- */
@@ -1089,11 +1258,16 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
     readInput(frame, now, dt);
     picker.update(dt);
+    settingsPanel.update(dt);
     paintPhotoLayer(frame);
     // 缩放后按需换更大的源图，让银幕始终接近 1:1 采样
     if (firstShowDone) refineSource();
     // 每秒刷一次诊断（帧时、采样比会持续变化）
-    if (now - hudTick > 1000) { hudTick = now; drawHud(); }
+    if (now - hudTick > 1000) {
+      hudTick = now;
+      if (settingsPanel.isOpen()) settingsPanel.setStatus(statusLine());
+      else drawHud();
+    }
     renderer.render(scene, camera);
   });
 
@@ -1113,6 +1287,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       else mat?.dispose();
     });
     picker.dispose();
+    settingsPanel.dispose();
     destroyPhotoLayer();
     if (layerPainter) {
       gl.deleteFramebuffer(layerPainter.fb);
