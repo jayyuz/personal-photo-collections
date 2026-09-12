@@ -15,9 +15,11 @@ const DEBOUNCE_MS = 200;
 interface GallerySearchProps {
   photos: Photo[];
   onFiltered: (list: Photo[]) => void;
+  /** 传了才显示「浏览模式」入口（少于两张没有播放的意义） */
+  onPlay?: () => void;
 }
 
-export function GallerySearch({ photos, onFiltered }: GallerySearchProps) {
+export function GallerySearch({ photos, onFiltered, onPlay }: GallerySearchProps) {
   const [input, setInput] = useState('');
   const [query, setQuery] = useState('');
   const [chip,  setChip]  = useState('');
@@ -90,6 +92,15 @@ export function GallerySearch({ photos, onFiltered }: GallerySearchProps) {
               </button>
             ))}
           </div>
+        )}
+        {onPlay && (
+          <button className="gsearch__play" onClick={onPlay}
+            title="全屏自动播放当前这些作品" aria-label="进入浏览模式，自动播放">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M8 5.2v13.6a.8.8 0 0 0 1.22.68l10.4-6.8a.8.8 0 0 0 0-1.36L9.22 4.52A.8.8 0 0 0 8 5.2z" />
+            </svg>
+            浏览模式
+          </button>
         )}
       </div>
       {filtering && result.length > 0 && (

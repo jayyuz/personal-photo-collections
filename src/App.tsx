@@ -6,6 +6,8 @@ import { Lightbox } from './Lightbox';
 import { AdminPanel } from './AdminPanel';
 import { GallerySearch } from './GallerySearch';
 import { packPhotos, useGridColumns } from './pack';
+import { loadSlideshow, saveSlideshow } from './slideshow';
+import type { SlideshowState } from './slideshow';
 
 export default function App() {
   const { photos, coverPhoto, addPhotos, removePhoto, setCover, updatePhotos } = usePhotos();
@@ -27,14 +29,52 @@ export default function App() {
 
   // 翻页跟着视觉顺序走，左右键就是眼睛看到的相邻两张
   const currentIndex = lightboxPhoto ? gallery.indexOf(lightboxPhoto) : -1;
+
+  /* ---------- 浏览模式：自动播放 ---------- */
+  const [ss, setSsState] = useState<SlideshowState>(loadSlideshow);
+  const setSs = useCallback(
+    (patch: Partial<SlideshowState>) => setSsState(prev => ({ ...prev, ...patch })),
+    []
+  );
+  // 动画和速度记下来，下次进来接着用
+  useEffect(() => { saveSlideshow(ss); }, [ss.effect, ss.speedMs]);
+
   const openLightbox  = useCallback((p: Photo) => setLightboxPhoto(p), []);
-  const closeLightbox = useCallback(() => setLightboxPhoto(null), []);
+  const closeLightbox = useCallback(() => {
+    setLightboxPhoto(null);
+    setSsState(prev => (prev.playing ? { ...prev, playing: false } : prev));
+  }, []);
+  // 浏览模式下首尾相接，播放到头了自动绕回第一张
   const prevPhoto = useCallback(() => {
-    if (currentIndex > 0) setLightboxPhoto(gallery[currentIndex - 1]);
+    const n = gallery.length;
+    if (n < 2 || currentIndex < 0) return;
+    setLightboxPhoto(gallery[(currentIndex - 1 + n) % n]);
   }, [currentIndex, gallery]);
   const nextPhoto = useCallback(() => {
-    if (currentIndex < gallery.length - 1) setLightboxPhoto(gallery[currentIndex + 1]);
+    const n = gallery.length;
+    if (n < 2 || currentIndex < 0) return;
+    setLightboxPhoto(gallery[(currentIndex + 1) % n]);
   }, [currentIndex, gallery]);
+
+  /** 从画廊直接进浏览模式：打开第一张就开始放 */
+  const startSlideshow = useCallback(() => {
+    const first = gallery[0];
+    if (!first) return;
+    setLightboxPhoto(first);
+    setSs({ playing: true });
+  }, [gallery, setSs]);
+
+  // 定时器只认「当前这张 + 速度」：手动翻页会换掉 lightboxPhoto，计时从零重来
+  useEffect(() => {
+    if (!ss.playing || !lightboxPhoto || gallery.length < 2) return;
+    const i = gallery.indexOf(lightboxPhoto);
+    if (i < 0) return;
+    const t = window.setTimeout(
+      () => setLightboxPhoto(gallery[(i + 1) % gallery.length]),
+      ss.speedMs
+    );
+    return () => window.clearTimeout(t);
+  }, [ss.playing, ss.speedMs, lightboxPhoto, gallery]);
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 40);
@@ -149,7 +189,11 @@ export default function App() {
             </section>
 
             {photos.length > 0 && (
-              <GallerySearch photos={photos} onFiltered={setSearched} />
+              <GallerySearch
+                photos={photos}
+                onFiltered={setSearched}
+                onPlay={visible.length > 1 ? startSlideshow : undefined}
+              />
             )}
 
             <section className="gallery" aria-label="摄影作品">
@@ -244,8 +288,11 @@ export default function App() {
         onClose={closeLightbox}
         onPrev={prevPhoto}
         onNext={nextPhoto}
-        hasPrev={currentIndex > 0}
-        hasNext={currentIndex < gallery.length - 1}
+        // 播放时能首尾相接，两端就都还有得翻
+        hasPrev={ss.playing ? gallery.length > 1 : currentIndex > 0}
+        hasNext={ss.playing ? gallery.length > 1 : currentIndex < gallery.length - 1}
+        slideshow={ss}
+        onSlideshow={setSs}
       />
     </div>
   );

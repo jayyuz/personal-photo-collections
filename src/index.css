@@ -163,7 +163,10 @@ a       { color: inherit; text-decoration: none; }
    竖图按这个高度去撑就会顶出可视区、上下被切掉。svh 取的是地址栏展开时的
    最小高度，更保守也更稳；后面再跟一条 vh 兜底给不支持 svh 的老浏览器。 */
 .lb__stage { width: 100%; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; max-height: 84svh; max-height: 84vh; position: relative; }
-.lb__placeholder { width: 480px; height: 600px; max-width: 100%; max-height: 80dvh; border-radius: 5px; background: rgba(255,255,255,0.05); animation: sk 1.6s linear infinite; }
+/* 骨架屏一定要脱离排版：它和 <img> 同为 .lb__stage 的 flex 子元素，并排一放
+   就会把图片挤离中线。预加载过的图一挂上就有尺寸，这时候骨架还在，画面就明显
+   偏出去了。改成绝对定位后它只是底衬，图片的居中完全由舞台决定。 */
+.lb__placeholder { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 480px; height: 600px; max-width: calc(100% - 20px); max-height: 84svh; max-height: 84vh; border-radius: 5px; background: rgba(255,255,255,0.05); animation: sk 1.6s linear infinite; }
 /* 画廊装裱效果：mat（卡纸衬板）+ 木质画框 + 墙面投影，全用 box-shadow 不占布局 */
 /* 宽高都按视口约束，object-fit: contain 会保证按比例完整显示、不裁切 */
 .lb__img { max-width: calc(100% - 20px); max-height: 84svh; max-height: 84vh; object-fit: contain; opacity: 0; cursor: pointer; border-radius: 3px; will-change: transform; user-select: none; -webkit-user-drag: none; transition: opacity 0.5s var(--ease-out), transform 0.22s var(--ease-out), box-shadow 0.3s var(--ease-out); box-shadow:
@@ -194,13 +197,14 @@ a       { color: inherit; text-decoration: none; }
 .lb__img--flip { box-shadow: none; pointer-events: none; transition: box-shadow 0.3s var(--ease-out); }
 /* 关闭时只有大图往卡片缩回去，背景和按钮同时退场 */
 .lb--closing .lb__backdrop, .lb--closing .lb__close, .lb--closing .lb__info-btn,
-.lb--closing .lb__vr, .lb--closing .lb__nav, .lb--closing .lb__panel, .lb--closing .lb__zoom {
+.lb--closing .lb__vr, .lb--closing .lb__nav, .lb--closing .lb__panel, .lb--closing .lb__zoom,
+.lb--closing .lb__play, .lb--closing .lb__ss, .lb--closing .lb__ss-prog {
   animation: none; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
 /* 缩不回卡片（放大着、或卡片已经滚出屏幕）时退而求其次，整块淡出 */
 .lb--fade { opacity: 0; pointer-events: none; transition: opacity 0.22s ease; }
 /* 常驻缩放条：放右上角，和关闭/信息/VR 同一排。
    放底部会占掉竖向空间，竖图就得更矮，不划算。 */
-.lb__zoom { position: absolute; top: 20px; right: 164px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 999px; font-size: 0.8125rem; letter-spacing: 0.06em; color: rgba(240,240,240,0.8); background: rgba(10,10,10,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); animation: lbFade 0.2s var(--ease-out); }
+.lb__zoom { position: absolute; top: 20px; right: 212px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 999px; font-size: 0.8125rem; letter-spacing: 0.06em; color: rgba(240,240,240,0.8); background: rgba(10,10,10,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); animation: lbFade 0.2s var(--ease-out); }
 @keyframes lbFade { from { opacity: 0; } to { opacity: 1; } }
 .lb__zoom span { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
 .lb__zoom button { min-width: 44px; padding: 9px 14px; border-radius: 999px; font-size: 0.9375rem; color: rgba(240,240,240,0.9); background: rgba(255,255,255,0.12); transition: background 0.15s, color 0.15s, opacity 0.15s; }
@@ -451,6 +455,8 @@ a       { color: inherit; text-decoration: none; }
 .lb__similar-thumb:focus-visible { outline: 1px solid #FFF; outline-offset: 2px; }
 /* 缩放条挪到右上角后，底部只剩相似排，用回原来的间距 */
 .lb--similar .lb__view { padding-bottom: 104px; }
+/* 浏览模式下相似排让位给控制条，底部回到常规间距 */
+.lb--ss.lb--similar .lb__view { padding-bottom: 32px; }
 /* 放大是为了看细节，这时候和缩放条抢底部位置没意义；退场时跟着一起消失 */
 .lb--zoom .lb__similar, .lb--closing .lb__similar { opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
 
@@ -473,4 +479,76 @@ a       { color: inherit; text-decoration: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .lb__similar-thumb:hover { transform: none; }
+}
+
+/* 浏览模式入口（画廊检索条右端） */
+.gsearch__play { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; padding: 8px 14px; font-size: 0.6875rem; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--border); background: none; transition: color 0.15s, border-color 0.15s, background 0.15s; }
+.gsearch__play:hover { color: var(--bg); background: var(--fg); border-color: var(--fg); }
+.gsearch__play:focus-visible { outline: 1px solid var(--fg); outline-offset: 3px; }
+
+/* 浏览模式：右上角播放开关 */
+.lb__play { position: absolute; top: 20px; right: 164px; z-index: 3; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; color: rgba(240,240,240,0.6); padding: 10px; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: color 0.15s, background 0.2s; animation: lbFade 0.3s ease 0.14s backwards; }
+.lb__play:hover { color: #FFF; background: rgba(255,255,255,0.14); }
+.lb__play--on { color: var(--bg); background: var(--fg); }
+.lb__play--on:hover { color: var(--bg); background: #FFF; }
+.lb__play:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
+
+/* 浏览模式：底部控制条 */
+.lb__ss { position: absolute; left: 50%; bottom: 18px; z-index: 7; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; max-width: calc(100% - 24px); padding: 8px 12px; border-radius: 999px; background: rgba(10,10,10,0.5); border: 1px solid rgba(255,255,255,0.12); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); animation: lbFade 0.24s var(--ease-out); }
+.lb__ss-btn { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; color: rgba(240,240,240,0.85); background: rgba(255,255,255,0.1); transition: color 0.15s, background 0.15s, opacity 0.15s; }
+.lb__ss-btn:hover:not(:disabled) { color: #FFF; background: rgba(255,255,255,0.26); }
+.lb__ss-btn:disabled { opacity: 0.28; cursor: default; }
+.lb__ss-btn:focus-visible { outline: 1px solid #FFF; outline-offset: 3px; }
+.lb__ss-btn--play { width: 40px; height: 40px; color: var(--bg); background: var(--fg); }
+.lb__ss-btn--play:hover:not(:disabled) { color: var(--bg); background: #FFF; }
+.lb__ss-sep { width: 1px; height: 20px; flex-shrink: 0; background: rgba(255,255,255,0.14); }
+.lb__ss-field { display: flex; align-items: center; gap: 7px; }
+.lb__ss-label { font-size: 0.625rem; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(240,240,240,0.5); white-space: nowrap; }
+.lb__ss-select { font-family: var(--f-body); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--fg); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); padding: 6px 8px; outline: none; transition: border-color 0.15s; }
+.lb__ss-select:focus { border-color: rgba(255,255,255,0.4); }
+.lb__ss-select option { background: #111; color: var(--fg); }
+.lb__ss-count { font-size: 0.6875rem; letter-spacing: 0.1em; color: rgba(240,240,240,0.6); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 播放到底前还剩多久，走屏幕最底下那条细线 */
+.lb__ss-prog { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; height: 2px; background: rgba(255,255,255,0.7); transform: scaleX(0); transform-origin: 0 50%; animation: ssProg linear both; }
+@keyframes ssProg { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+/* 播放时底部位置归控制条，相似排收起来 */
+.lb--ss .lb__similar { opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+/* 静止一会儿就把界面淡掉，动一下鼠标/手指或按键就回来（见 Lightbox 的 idle） */
+.lb--idle { cursor: none; }
+.lb--idle .lb__close, .lb--idle .lb__info-btn, .lb--idle .lb__vr, .lb--idle .lb__play,
+.lb--idle .lb__nav, .lb--idle .lb__zoom, .lb--idle .lb__panel,
+.lb--idle .lb__ss, .lb--idle .lb__ss-prog { opacity: 0; pointer-events: none; transition: opacity 0.4s ease; }
+
+/* 切换动画：给大图挂个 animation-name，落位后回到基础样式（transform 仍是手势在用） */
+.lb__img--ss { animation-duration: var(--ss-t, 720ms); animation-timing-function: var(--ease-out); }
+.lb__img--ss-fade    { animation-name: ssFade; }
+.lb__img--ss-slide   { animation-name: ssSlide; }
+.lb__img--ss-rise    { animation-name: ssRise; }
+.lb__img--ss-zoomIn  { animation-name: ssZoomIn; }
+.lb__img--ss-zoomOut { animation-name: ssZoomOut; }
+.lb__img--ss-flip    { animation-name: ssFlip; }
+.lb__img--ss-focus   { animation-name: ssFocus; }
+@keyframes ssFade    { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ssSlide   { from { opacity: 0; transform: translate3d(7%, 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes ssRise    { from { opacity: 0; transform: translate3d(0, 6%, 0) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes ssZoomIn  { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+@keyframes ssZoomOut { from { opacity: 0; transform: scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes ssFlip    { from { opacity: 0; transform: perspective(1600px) rotateY(-40deg) scale(0.96); } to { opacity: 1; transform: perspective(1600px) rotateY(0deg) scale(1); } }
+@keyframes ssFocus   { from { opacity: 0; filter: blur(18px) saturate(1.35); transform: scale(1.05); } to { opacity: 1; filter: blur(0px) saturate(1); transform: none; } }
+
+@media (max-width: 860px) {
+  .lb__ss { bottom: 18px; gap: 8px; padding: 7px 10px; border-radius: 18px; }
+  .lb__ss-label { display: none; }
+  .lb__ss-select { max-width: 104px; padding: 5px 6px; }
+  /* 底边中间被控制条占了：翻页按钮和缩放条往上让一层 */
+  .lb--ss .lb__nav { bottom: 78px; }
+  .lb--ss .lb__zoom { bottom: 78px; }
+  /* 底部也给控制条留出位置，否则它会压在照片上（上面 64 / 下面 32 会偏出中线） */
+  .lb--ss.lb--similar .lb__view { padding-bottom: 84px; }
+}
+@media (max-width: 600px) {
+  .gsearch__play { margin-left: 0; }
+  .lb__ss { gap: 6px; padding: 6px 8px; }
+  .lb__ss-select { max-width: 88px; font-size: 0.6875rem; }
+  .lb__ss-count { display: none; }
 }

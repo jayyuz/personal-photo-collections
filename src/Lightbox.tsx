@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import type { Photo, PhotoExif } from './data';
 import { exifRows, readExifFromUrl } from './exif';
 import { similarTo } from './ml/search';
 import { cardGeometry } from './PhotoCard';
 import type { CardGeometry } from './PhotoCard';
 import type { CinemaHandle } from './vr/cinema';
+import { SLIDE_EFFECTS, SLIDE_SPEEDS, resolveEffect } from './slideshow';
+import type { ConcreteEffect, SlideshowState } from './slideshow';
 
 interface LightboxProps {
   photo: Photo | null;
@@ -16,6 +18,9 @@ interface LightboxProps {
   onNext: () => void;
   hasPrev: boolean;
   hasNext: boolean;
+  /** 浏览模式（幻灯片）状态，由 App 持有：轮播定时器也在那边 */
+  slideshow: SlideshowState;
+  onSlideshow: (patch: Partial<SlideshowState>) => void;
 }
 
 /** 用 Cloudinary 生成一张极小的模糊图，做背景比在前端 blur 大图省得多 */
@@ -60,6 +65,8 @@ const SIMILAR_MAX = 5;
 const SWIPE_MIN = 48;
 /** 单指移动超过这个距离就不算点击，免得滑一下把信息层切出来 */
 const TAP_SLOP = 6;
+/** 自动播放时静止多久就把界面淡掉 */
+const IDLE_MS = 2600;
 
 interface View { s: number; x: number; y: number }
 
@@ -84,7 +91,9 @@ interface Gesture {
 
 export function Lightbox({
   photo, photos, onSelect, onClose, onPrev, onNext, hasPrev, hasNext,
+  slideshow, onSlideshow,
 }: LightboxProps) {
+  const { playing, effect, speedMs } = slideshow;
   const [loaded, setLoaded] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [liveExif, setLiveExif] = useState<PhotoExif | undefined>();
@@ -106,10 +115,59 @@ export function Lightbox({
   const pendingFlipRef = useRef<{ geo: CardGeometry; at: number } | null>(null);
   // 手势过程中要读最新 view，用 ref 镜像一份，免得闭包拿到旧值
   const viewRefState = useRef<View>(view);
+  /** 本次打开灯箱时第一张照片的 id：它不做切换动画，免得和放大动画打架 */
+  const firstPhotoRef = useRef<string | null>(null);
+  /** 当前这张抽到的切换动画，按「图片 + 动画选项」缓存，避免每次渲染重抽 */
+  const ssEffectRef = useRef<{ key: string; name: ConcreteEffect }>({ key: '', name: 'fade' });
+  /** 预加载出来的 Image，存着免得被 GC 回收 */
+  const preloadRef = useRef<HTMLImageElement[]>([]);
 
   useEffect(() => { viewRefState.current = view; }, [view]);
 
-  useEffect(() => { setLoaded(false); setView(FIT); setSwipe(0); }, [photo?.id]);
+  /**
+   * 换图。
+   *
+   * 用 layout effect 而不是普通 effect：新的 <img> 这时候已经挂上去了，可以
+   * 直接问它「你已经有图了吗」。预加载过的图 complete 就是 true，于是这一帧
+   * 同步改完再画，画面直接是满的。
+   *
+   * 之前一律 setLoaded(false)、等 onLoad 回来才亮：缓存里的图其实已经能画了，
+   * 却先被按成透明，而它又在 paint 之后才执行（普通 effect），于是「先显示
+   * 一下 → 空白 → 再淡入」。切换动画只有 720ms，图要是这时候还没 onLoad，
+   * 动画一结束就彻底空白了。
+   */
+  useLayoutEffect(() => {
+    const img = imgRef.current;
+    setLoaded(!!img && img.complete && img.naturalWidth > 0);
+    setView(FIT);
+    setSwipe(0);
+  }, [photo?.id]);
+
+  /**
+   * 预加载：把后面几张（和前一张）先拉下来。
+   * 浏览模式每几秒就要换一张，等点到了再去下载，大图必然要空一下。
+   */
+  useEffect(() => {
+    if (!photo || photos.length < 2) return;
+    const i = photos.findIndex(p => p.id === photo.id);
+    if (i < 0) return;
+    const n = photos.length;
+    // 播放时多囤几张，速度再快也追得上；手动翻只备紧邻的
+    const ahead = playing ? 3 : 1;
+    const wanted = new Map<string, string>();
+    for (let k = 1; k <= ahead; k++) wanted.set(photos[(i + k) % n].id, photos[(i + k) % n].src);
+    wanted.set(photos[(i - 1 + n) % n].id, photos[(i - 1 + n) % n].src);
+    wanted.delete(photo.id);
+    // 留着引用，别刚拉完就被回收掉
+    const keep: HTMLImageElement[] = [];
+    for (const src of wanted.values()) {
+      const im = new Image();
+      im.decoding = 'async';
+      im.src = src;
+      keep.push(im);
+    }
+    preloadRef.current = keep;
+  }, [photo, photos, playing]);
 
   /** 平移不能把图片拖出可视区之外 */
   const clampOffset = useCallback((s: number, x: number, y: number) => {
@@ -237,6 +295,7 @@ export function Lightbox({
     if (!photo) {
       openedRef.current = false;
       pendingFlipRef.current = null;
+      firstPhotoRef.current = null;
       flipRef.current = null;
       window.clearTimeout(exitTimerRef.current);
       setFlipping(false);
@@ -245,10 +304,10 @@ export function Lightbox({
     }
     if (openedRef.current) return;
     openedRef.current = true;
+    firstPhotoRef.current = photo.id;
     const geo = reduceMotion() ? null : cardGeometry(photo.id);
     pendingFlipRef.current = geo ? { geo, at: performance.now() } : null;
-    // 缓存里的图有可能不再触发 onLoad，自己问一声
-    if (imgRef.current?.complete) setLoaded(true);
+    // loaded 由上面那个 layout effect 同步判过了，这里不用再问一次
   }, [photo]);
 
   // 要等图片有尺寸了才能算终点，所以放在 loaded 之后
@@ -299,6 +358,34 @@ export function Lightbox({
     document.body.style.overflow = photo ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [photo]);
+
+  /* ---------- 浏览模式：自动播放时的界面自动隐藏 ---------- */
+
+  /**
+   * 播放着的时候把按钮、信息面板、进度条都淡掉，只留画面 —— 跟视频播放器一样，
+   * 动一下鼠标/手指或按任意键就回来。
+   */
+  const [idle, setIdle] = useState(false);
+  const idleRef = useRef(false);
+  useEffect(() => {
+    if (!playing) { idleRef.current = false; setIdle(false); return; }
+    let timer = 0;
+    const wake = () => {
+      if (idleRef.current) { idleRef.current = false; setIdle(false); }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { idleRef.current = true; setIdle(true); }, IDLE_MS);
+    };
+    wake();
+    window.addEventListener('pointermove', wake, { passive: true });
+    window.addEventListener('pointerdown', wake, { passive: true });
+    window.addEventListener('keydown', wake);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pointermove', wake);
+      window.removeEventListener('pointerdown', wake);
+      window.removeEventListener('keydown', wake);
+    };
+  }, [playing]);
 
   /* ---------- VR 影院 ---------- */
   const [vrReady,  setVrReady]  = useState(false);
@@ -474,6 +561,13 @@ export function Lightbox({
         case 'i': case 'I':
           e.preventDefault();
           setView(FIT); setInfoOpen(v => !v); return;
+        // 空格 / P：开关自动播放（只有一张时不玩这个）
+        case ' ': case 'p': case 'P':
+          if (photos.length > 1) {
+            e.preventDefault();
+            onSlideshow({ playing: !playing });
+          }
+          return;
         case 'Escape':
           e.preventDefault();
           if (viewRefState.current.s > 1) setView(FIT);
@@ -483,7 +577,7 @@ export function Lightbox({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [photo, zoomAt, onPrev, onNext, requestClose, setInfoOpen]);
+  }, [photo, zoomAt, onPrev, onNext, requestClose, setInfoOpen, onSlideshow, playing, photos.length]);
 
   /** 以视口中心为锚点逐级缩放，给屏幕按钮用 */
   const zoomStep = useCallback((factor: number) => {
@@ -676,6 +770,24 @@ export function Lightbox({
   const vrTrace = (window as unknown as { __vrTrace?: string[] }).__vrTrace;
   const zoomed = view.s > 1;
 
+  /**
+   * 这一帧该用哪个切换动画。
+   * 只在「正在播放 + 不是本次打开的第一张 + 图已经能画了」时挂动画：
+   * - 打开那一下是 runFlip 的从卡片放大，两套动画同时跑会互相打断；
+   * - 图没到位就挂动画，动画会在一个空盒子上白跑一趟，等图来了动画早结束了。
+   *   挂在 loaded 之后，动画开始 == 画面出现，切换永远看得见。
+   * random 每次换图现抽一个，缓存到 ssEffectRef，免得重渲染时又抽一次。
+   */
+  let ssEffect: ConcreteEffect | '' = '';
+  if (playing && loaded && photo.id !== firstPhotoRef.current) {
+    const key = `${photo.id}|${effect}`;
+    if (ssEffectRef.current.key !== key) {
+      ssEffectRef.current = { key, name: resolveEffect(effect) };
+    }
+    ssEffect = ssEffectRef.current.name;
+  }
+  const ssIndex = photos.findIndex(p => p.id === photo.id);
+
   return (
     <div
       className={[
@@ -683,6 +795,8 @@ export function Lightbox({
         zoomed ? 'lb--zoom' : '',
         infoOpen ? 'lb--info' : '',
         similar.length ? 'lb--similar' : '',
+        playing ? 'lb--ss' : '',
+        idle ? 'lb--idle' : '',
         exit === 'flip' ? 'lb--closing' : '',
         exit === 'fade' ? 'lb--fade' : '',
       ].filter(Boolean).join(' ')}
@@ -753,6 +867,26 @@ export function Lightbox({
             </svg>
           </button>
         ) : null}
+        {photos.length > 1 && (
+          <button
+            className={`lb__play ${playing ? 'lb__play--on' : ''}`}
+            onClick={() => onSlideshow({ playing: !playing })}
+            aria-pressed={playing}
+            aria-label={playing ? '停止自动播放' : '开始自动播放'}
+            title={playing ? '停止自动播放（空格）' : '浏览模式：自动播放（空格）'}
+          >
+            {playing ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="7" y="5" width="3.6" height="14" rx="0.6" />
+                <rect x="13.4" y="5" width="3.6" height="14" rx="0.6" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M8 5.2v13.6a.8.8 0 0 0 1.22.68l10.4-6.8a.8.8 0 0 0 0-1.36L9.22 4.52A.8.8 0 0 0 8 5.2z" />
+              </svg>
+            )}
+          </button>
+        )}
         <div className="lb__stage">
           {!loaded && <div className="lb__placeholder" />}
           <img
@@ -767,6 +901,7 @@ export function Lightbox({
               zoomed ? 'lb__img--zoomed' : '',
               gesturing ? 'lb__img--live' : '',
               flipping ? 'lb__img--flip' : '',
+              ssEffect ? `lb__img--ss lb__img--ss-${ssEffect}` : '',
             ].filter(Boolean).join(' ')}
             style={{
               transform:
@@ -822,6 +957,82 @@ export function Lightbox({
           </div>
         )}
       </div>
+
+      {/* 浏览模式控制条：播放/暂停 + 翻页 + 切换动画 + 切换速度 */}
+      {playing && (
+        <div className="lb__ss" role="group" aria-label="浏览模式">
+          <button className="lb__ss-btn" onClick={onPrev} disabled={!hasPrev} aria-label="上一张">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M17.5 5.2v13.6a.8.8 0 0 1-1.23.68L6.1 12.68a.8.8 0 0 1 0-1.36L16.27 4.52a.8.8 0 0 1 1.23.68z" />
+              <rect x="4" y="5" width="2.2" height="14" rx="0.5" />
+            </svg>
+          </button>
+          <button
+            className="lb__ss-btn lb__ss-btn--play"
+            onClick={() => onSlideshow({ playing: false })}
+            aria-label="暂停自动播放"
+            title="暂停（空格）"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="7" y="5" width="3.6" height="14" rx="0.6" />
+              <rect x="13.4" y="5" width="3.6" height="14" rx="0.6" />
+            </svg>
+          </button>
+          <button className="lb__ss-btn" onClick={onNext} disabled={!hasNext} aria-label="下一张">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M6.5 5.2v13.6a.8.8 0 0 0 1.23.68L17.9 12.68a.8.8 0 0 0 0-1.36L7.73 4.52A.8.8 0 0 0 6.5 5.2z" />
+              <rect x="17.8" y="5" width="2.2" height="14" rx="0.5" />
+            </svg>
+          </button>
+
+          <span className="lb__ss-sep" aria-hidden="true" />
+
+          <label className="lb__ss-field">
+            <span className="lb__ss-label">动画</span>
+            <select
+              className="lb__ss-select"
+              value={effect}
+              onChange={e => onSlideshow({ effect: e.target.value as SlideshowState['effect'] })}
+              aria-label="切换动画"
+            >
+              {SLIDE_EFFECTS.map(o => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="lb__ss-field">
+            <span className="lb__ss-label">速度</span>
+            <select
+              className="lb__ss-select"
+              value={speedMs}
+              onChange={e => onSlideshow({ speedMs: Number(e.target.value) })}
+              aria-label="自动切换速度"
+            >
+              {SLIDE_SPEEDS.map(o => (
+                <option key={o.ms} value={o.ms}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          {ssIndex >= 0 && (
+            <>
+              <span className="lb__ss-sep" aria-hidden="true" />
+              <span className="lb__ss-count">{ssIndex + 1} / {photos.length}</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 距离下一张还有多久：宽度按速度线性涨满，换图时 key 变了重新跑 */}
+      {playing && (
+        <div
+          key={`ss-prog-${photo.id}-${speedMs}`}
+          className="lb__ss-prog"
+          style={{ animationDuration: `${speedMs}ms` }}
+          aria-hidden="true"
+        />
+      )}
 
       {vrNote && (
         <p className="lb__vr-note" style={{ maxWidth: 'calc(100% - 32px)' }}>
