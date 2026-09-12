@@ -39,6 +39,21 @@ const FLIP_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
 const IMG_RADIUS = 3;
 /** 缩不回卡片时的整块淡出，要和 .lb--fade 的过渡对齐 */
 const EXIT_FADE_MS = 220;
+/**
+ * 是不是 Pico 头显浏览器。
+ *
+ * 只有这类设备才需要屏幕上的缩放按钮：它们的控制器在 2D 网页里只表现为一个
+ * 指针（横向拖动被当成滑动手势 → 能翻页，但缩放要双指捏合 → 永远触发不了），
+ * 而手柄按键又不向网页暴露。桌面和手机上本来就有滚轮 / 捏合，不需要这套按钮。
+ */
+const IS_PICO = typeof navigator !== 'undefined'
+  && (/Pico|PICO|VR_Pico|PicoVR/i.test(navigator.userAgent)
+    || (navigator.userAgent.includes('Android') && /VR|Quest/i.test(navigator.userAgent)));
+/** 想强制显示/隐藏缩放条时用 ?zoombar=1 / ?zoombar=0 */
+const zoomBarOverride = typeof window !== 'undefined'
+  ? new URLSearchParams(window.location.search).get('zoombar')
+  : null;
+
 /** 「相似」一行最多放几张 */
 const SIMILAR_MAX = 5;
 /** 滑动超过这个距离（或屏宽的 16%）就翻页 */
@@ -288,10 +303,10 @@ export function Lightbox({
   /* ---------- VR 影院 ---------- */
   const [vrReady,  setVrReady]  = useState(false);
   const [vrWhy,    setVrWhy]    = useState('');
+  /** 是否「VR 一体机浏览器」：这类设备要用屏幕按钮补上手柄缺失的缩放能力 */
+  const [vrLike,   setVrLike]   = useState(IS_PICO);
   const [vrBusy,   setVrBusy]   = useState(false);
   const [vrNote,   setVrNote]   = useState('');
-  /** VR 环境自检，直接显示在页面上：头显里看不了控制台，只能这样排查 */
-  const [vrDiag,   setVrDiag]   = useState('');
   const cinemaRef = useRef<CinemaHandle | null>(null);
 
   useEffect(() => {
@@ -311,11 +326,6 @@ export function Lightbox({
         }
       }
       if (!alive) return;
-      const proto = location.protocol;
-      setVrDiag(
-        `VR自检 ${proto} secure=${secure ? 'Y' : 'N'} xr=${hasXr ? 'Y' : 'N'} ` +
-        `immersive-vr=${String(supported)} ua=${navigator.userAgent.slice(0, 40)}`
-      );
       if (!hasXr) {
         setVrReady(false);
         setVrWhy(secure ? '当前浏览器不支持 WebXR' : '页面不是安全上下文（需 HTTPS 或 localhost）');
@@ -323,6 +333,8 @@ export function Lightbox({
       }
       const ok = supported === true;
       setVrReady(ok);
+      // 支持 immersive-vr 就说明这是一体机浏览器，即使 UA 里没有 Pico 字样
+      if (ok) setVrLike(true);
       if (!ok) setVrWhy(`浏览器支持 WebXR，但没有检测到 VR 设备（${String(supported)}）`);
     })();
     return () => { alive = false; };
@@ -766,17 +778,19 @@ export function Lightbox({
           />
         </div>
         {/*
-          常驻缩放控件。
-          Pico 手柄在网页里只表现为一个指针：横向拖动能触发翻页手势，
-          但缩放要双指捏合，单指针永远触发不了。而手柄按键又不向 2D 网页暴露，
-          所以只能靠屏幕按钮 —— 点击手势是唯一确定可用的输入。
+          缩放控件（只在 Pico 等一体机浏览器上显示）。
+          手柄在网页里只表现为一个指针：横向拖动被当成滑动手势所以能翻页，
+          但缩放要双指捏合，单指针永远触发不了；手柄按键又不向网页暴露。
+          于是只能靠屏幕按钮 —— 点击是这类设备上唯一确定可用的输入。
         */}
-        <div className="lb__zoom" onPointerDown={e => e.stopPropagation()}>
-          <button onClick={zoomOut} disabled={!zoomed} aria-label="缩小">－</button>
-          <span>{Math.round(view.s * 100)}%</span>
-          <button onClick={zoomIn} aria-label="放大">＋</button>
-          <button onClick={() => setView(FIT)} disabled={!zoomed} aria-label="复位">复位</button>
-        </div>
+        {(zoomBarOverride === '1' || (vrLike && zoomBarOverride !== '0')) && (
+          <div className="lb__zoom" onPointerDown={e => e.stopPropagation()}>
+            <button onClick={zoomOut} disabled={!zoomed} aria-label="缩小">－</button>
+            <span>{Math.round(view.s * 100)}%</span>
+            <button onClick={zoomIn} aria-label="放大">＋</button>
+            <button onClick={() => setView(FIT)} disabled={!zoomed} aria-label="复位">复位</button>
+          </div>
+        )}
         {hasPrev && (
           <button className="lb__nav lb__nav--prev" onClick={onPrev} aria-label="上一张">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -809,10 +823,8 @@ export function Lightbox({
         )}
       </div>
 
-      {(vrNote || vrDiag) && (
+      {vrNote && (
         <p className="lb__vr-note" style={{ maxWidth: 'calc(100% - 32px)' }}>
-          {vrDiag}
-          {vrDiag && vrNote ? '\n' : ''}
           {vrNote}
         </p>
       )}

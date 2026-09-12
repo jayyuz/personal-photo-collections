@@ -70,6 +70,14 @@ const CFG = {
   exitHoldMs: 900,
   /** 长按 X 键多久算「打开设置」而不是「上一张」 */
   menuHoldMs: 600,
+  /**
+   * 环境亮度基准。
+   * 按 SMPTE ST 2080-3：环境光 ≈ 屏幕峰值亮度的 10%。
+   * 银幕（MeshBasicMaterial 白底）最终亮度就是贴图值，约等于 1.0；
+   * 房间 albedo 取 0x9c9a95（线性约 0.34），乘上 ambientBase 得到实际亮度 ——
+   * 0.30 × 0.34 ≈ 0.10，正好落在 10% 这个参考点上。
+   */
+  environment: { ambientBase: 0.30, glowBase: 18, biasOpacity: 0.5 },
   /** 设置面板：摆在视线下方，调的时候银幕还看得见 */
   settings:  { width: 1.6, dist: 1.9, dropY: -0.5, tilt: 0.34 },
 
@@ -201,6 +209,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const requestLayers = settings.useLayers;
   /** 实际申请成功的特性组合，显示在诊断里，方便定位是哪个特性惹的祸 */
   let sessionFeatures = '';
+  const needLayersFeature = requestLayers;
 
   /*
    * 还有一个更隐蔽的坑：three 里
@@ -210,10 +219,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
    * 它**不检查 layers 是不是真的申请过**。只要运行时把 renderState.layers
    * 初始化成空数组（有些实现会这么做），three 就走 projection 分支，
    * 内部 getBinding() 拿到 null —— 就是那个 "reading getBinding"。
-   * 所以一旦开了「强制缓冲」（自己传 XRWebGLLayer），必须同时申请 layers，
-   * 否则 three 会把我们传的层丢掉、再自己去建投影层，然后崩。
    */
-  const needLayersFeature = requestLayers || settings.forceWidth > 0;
   // 会话请求失败要能看到原因，否则界面上就是「点了没反应」。
   /*
    * 逐级降级地请求会话。
@@ -304,56 +310,23 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     layersEnabled ? scaleBase : scaleBase * settings.renderScale
   );
   renderer.xr.setFramebufferScaleFactor(framebufferScale);
-  /** 强制缓冲的结果，显示在诊断里 */
-  let forcedNote = settings.forceWidth > 0 ? `请求强制缓冲 ${settings.forceWidth}` : '';
+
 
   /*
-   * 强制指定眼缓冲尺寸。
+   * 这里曾经尝试过「强制指定眼缓冲尺寸」：自己 new XRWebGLLayer({framebufferWidth,...})
+   * 再传给 setSession，用来绕开被封顶的 framebufferScaleFactor。
    *
-   * three 建层时只传 framebufferScaleFactor，不传像素尺寸：
-   *   new XRWebGLLayer(session, gl, { framebufferScaleFactor, ... })
-   * 而很多运行时会对这个倍率封顶（实测倍率给到 4.0，缓冲仍是 1440x1584），
-   * 于是角分辨率被锁死在 ~14 px/°，怎么调都不变清晰。
-   * XRWebGLLayer 的构造参数是支持直接指定 framebufferWidth/Height 的，
-   * 这里自己建一层传进去，绕开封顶。
+   * 但在 Pico 上这条路进不去 VR：一旦传自定义 base layer，three 就会走
+   * projection 分支（它只看 renderState.layers 有没有值、不关心我们传了什么），
+   * 运行时建不出真正的投影层，getBinding() 拿到 null 就崩。
+   * 所以放弃这条路，只保留倍率调节。代码留个注释，别再踩。
    */
-  // 说明：framebufferWidth/Height 和 setSession 的第二参数都是规范里有的
-  // （MDN 上的 XRWebGLLayer 构造参数），但 TypeScript 内置的 lib.dom 还没跟上，
-  // 所以这里做一次类型断言，只在运行时真的支持时才用。
-  const LayerCtor = XRWebGLLayer as unknown as
-    (new (s: XRSession, gl: WebGLRenderingContext, init: Record<string, unknown>) => XRWebGLLayer)
-    | undefined;
-  let forcedLayer: XRWebGLLayer | null = null;
-  if (settings.forceWidth > 0 && LayerCtor) {
-    try {
-      const w = settings.forceWidth;
-      const h = Math.round(w * 1.1);   // 跟实测到的 1440x1584 同比例
-      forcedLayer = new LayerCtor(session, renderer.getContext(), {
-        framebufferWidth:  w,
-        framebufferHeight: h,
-        antialias: false,              // 分辨率上去后就不需要 MSAA 了，省性能
-        alpha: true,
-      });
-      forcedNote = `强制缓冲 ${w}x${h}`;
-    } catch (e) {
-      forcedLayer = null;
-      forcedNote = `强制失败:${String(e).slice(0, 18)}`;
-    }
-  }
-
-  /** three 的 setSession 支持第二参数（自定义 base layer），但类型声明里没有 */
-  const setSession = renderer.xr.setSession as unknown as
-    (s: XRSession, layer?: XRWebGLLayer | null) => Promise<void>;
 
   // local-floor 拿不到就退回 local，至少能进得去。
   // 异常一定要能看到，否则界面上就是「点了 VR 没反应」。
-  const startSession = () =>
-    forcedLayer ? setSession(session, forcedLayer) : renderer.xr.setSession(session);
-
-  mark(`建层前 forced=${forcedLayer ? 'Y' : 'N'}`);
   try {
     renderer.xr.setReferenceSpaceType('local-floor');
-    await startSession();
+    await renderer.xr.setSession(session);
     // 注意：这里不能调后面才声明的工具函数（TDZ 会直接抛异常），内联取值
     const vp = renderer.xr.getCamera().cameras[0] as
       | (THREE.PerspectiveCamera & { viewport?: THREE.Vector4 }) | undefined;
@@ -363,7 +336,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     console.error('[vr] setSession 失败', e);
     try {
       renderer.xr.setReferenceSpaceType('local');
-      await startSession();
+      await renderer.xr.setSession(session);
     } catch (e2) {
       mark(`local 回退也失败:${e2 instanceof Error ? e2.name : '?'}`);
       console.error('[vr] 回退到 local 仍失败', e2);
@@ -372,6 +345,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     }
   }
   mark('场景开始搭建');
+
+  const ENV = CFG.environment;
 
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
   const maxTexSize = renderer.capabilities.maxTextureSize || 4096;
@@ -398,26 +373,36 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     return cloudinaryFit(src, Math.min(mode, maxSourceSide), CFG.quality, settings.sharpen);
   };
 
-  /* ---------- 放映厅 ---------- */
+  /* ---------- 放映厅 ----------
+   *
+   * 布光依据 SMPTE ST 2080-3（参考观看环境）：
+   *   环境光亮度应约为屏幕峰值亮度的 10%，色温取 D65 中性。
+   * 之前房间接近纯黑（0x121216），银幕是视野里唯一亮源 ——
+   * 亮比过大导致眩光、瞳孔收缩，暗部细节看不出来，主观上就觉得「糊、发灰」。
+   * 环境提到 ~10% 后，眼睛适应状态稳定，暗部层次和锐度感都会回来。
+   *
+   * 颜色刻意用中性偏冷的灰（不是纯黑也不是彩色），避免给照片染色 ——
+   * 同时对比（simultaneous contrast）会让环境色反向影响对画面白平衡的判断。
+   */
   // 放映厅几乎铺满整个视野，用 PBR（MeshStandardMaterial）画等于按原生分辨率
   // 跑一遍全屏 PBR，Pico 这一档 GPU 很容易掉帧；Lambert 便宜得多，观感差别极小。
   const room = new THREE.Mesh(
     new THREE.BoxGeometry(CFG.room.w, CFG.room.h, CFG.room.d),
-    new THREE.MeshLambertMaterial({ color: 0x121216, side: THREE.BackSide })
+    new THREE.MeshLambertMaterial({ color: 0x9c9a95, side: THREE.BackSide })
   );
   room.position.set(0, CFG.room.h / 2, -CFG.room.d / 2 + 8);
   scene.add(room);
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(CFG.room.w, CFG.room.d),
-    new THREE.MeshLambertMaterial({ color: 0x141210 })
+    new THREE.MeshLambertMaterial({ color: 0x6e6a64 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0.001, -CFG.room.d / 2 + 8);
   scene.add(floor);
 
   // 座椅只做空间参照，不需要精准
-  const seatMat  = new THREE.MeshLambertMaterial({ color: 0x1b1b1e });
+  const seatMat  = new THREE.MeshLambertMaterial({ color: 0x5a5751 });
   const seatGeom = new THREE.BoxGeometry(0.55, 0.9, 0.6);
   for (let row = 0; row < 3; row++) {
     for (let col = -4; col <= 4; col++) {
@@ -427,9 +412,12 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     }
   }
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-  // 银幕的溢光：厅里由近及远变暗，又不至于全黑到失去空间感
-  const glow = new THREE.PointLight(0xbfd4ff, 50, 45, 1.2);
+  // 环境基础照明（整体亮度，可在设置面板里调）
+  const ambient = new THREE.AmbientLight(0xf2f4f8, ENV.ambientBase);
+  scene.add(ambient);
+  // 银幕的溢光：厅里由近及远变暗，又不至于全黑到失去空间感。
+  // 强度调低了 —— 之前 50 太亮，会在银幕周围糊出一团光，反而不利。
+  const glow = new THREE.PointLight(0xd8e4ff, ENV.glowBase, 45, 1.4);
   glow.position.set(0, CFG.screen.y, CFG.screen.z + 3);
   scene.add(glow);
 
@@ -444,6 +432,19 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const border = new THREE.Mesh(unitQuad, new THREE.MeshBasicMaterial({ color: 0x1a1a1d }));
   border.position.set(0, CFG.screen.y, CFG.screen.z - 0.08);
   scene.add(border);
+
+  /*
+   * Bias light：银幕背后的一圈柔和背光。
+   * 这是参考观看环境里最关键的一样东西（SMPTE ST 2080-3 的 10% 规定主要就靠它实现）：
+   * 它让银幕边界不至于直接接进暗环境，降低亮比，眼睛的适应状态稳定，
+   * 暗部层次和锐度感都会明显变好。颜色取中性冷白，别给画面染色。
+   */
+  const biasMat = new THREE.MeshBasicMaterial({
+    color: 0xdfe6f2, transparent: true, opacity: ENV.biasOpacity,
+  });
+  const bias = new THREE.Mesh(unitQuad, biasMat);
+  bias.position.set(0, CFG.screen.y, CFG.screen.z - 0.16);
+  scene.add(bias);
 
   const photoMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
   const photo = new THREE.Mesh(unitQuad, photoMat);
@@ -767,6 +768,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     const s = settings.screenScale;
     frame.scale.set(CFG.screen.w * s + 0.5, CFG.screen.h * s + 0.5, 1);
     border.scale.set(CFG.screen.w * s + 0.9, CFG.screen.h * s + 0.9, 1);
+    // 背光比边框再大一圈，形成柔和光晕
+    bias.scale.set(CFG.screen.w * s + 2.6, CFG.screen.h * s + 2.6, 1);
 
     let w = CFG.photo.maxW * s;
     let h = w / photoAspect;
@@ -906,11 +909,9 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
       ? (sourcePixels.w / (foot * zoom)).toFixed(2)
       : 'n/a';
     return [
-      `缓冲 ${eyeBufferText()} 实宽${effectiveEyeWidth() || '-'} ${forcedNote}`,
-      `特性 ${sessionFeatures}`,
+      `缓冲 ${eyeBufferText()} 特性 ${sessionFeatures}`,
       `摇杆 ${axesDump || '—'}`,
-      `视锥 ${horizontalFov().toFixed(0)}° 缓冲${eyeBufferText()}`,
-      `倍率 ${framebufferScale.toFixed(2)}(原生${nativeScale.toFixed(2)})`,
+      `视锥 ${horizontalFov().toFixed(0)}° 倍率 ${framebufferScale.toFixed(2)}(原生${nativeScale.toFixed(2)})`,
       `密度 ${measuredPxPerMeter ? measuredPxPerMeter.toFixed(0) : '量中'}px/m 占位 ${foot}px`,
       `源图 ${sizeText(sourcePixels)} 请图 ${lastAsk} 比 ${ratio}`,
       `照片 ${photo.scale.x.toFixed(2)}m 比 ${photoAspect.toFixed(2)} zoom ${zoom.toFixed(1)}`,
@@ -1183,7 +1184,8 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
     hudCtx.clearRect(0, 0, w, hudCanvas.height);
     // 半透明底：银幕溢光在这块深底上才能看清字
     roundRectPath(hudCtx, w, hudCanvas.height, 30);
-    hudCtx.fillStyle = 'rgba(10,10,14,0.42)';
+    // 环境变亮后，信息条底要更实一点，否则白色文字压不住
+    hudCtx.fillStyle = 'rgba(8,8,10,0.62)';
     hudCtx.fill();
 
     hudCtx.textAlign = 'center';
@@ -1447,6 +1449,11 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
   const applySettings = (refetch: boolean) => {
     saveSettings(settings);
     renderer.xr.setFoveation(settings.foveation);
+    // 环境亮度：SMPTE 参考值是 1，0 就是传统全黑影院
+    ambient.intensity = ENV.ambientBase * settings.ambient;
+    glow.intensity    = ENV.glowBase * settings.ambient;
+    biasMat.opacity   = ENV.biasOpacity * settings.ambient;
+    bias.visible      = settings.ambient > 0;
     if (texture) prepare(texture);
     applyLayerPreference();
     relayoutScreen();
@@ -1458,7 +1465,7 @@ export async function startCinema(opts: CinemaOptions): Promise<CinemaHandle> {
 
   /** 改了这些就得重下图：要么影响 URL，要么影响该下多大 */
   const NEEDS_REFETCH: ReadonlySet<string> = new Set([
-    'screenScale', 'superSample', 'sharpen', 'useLayers', 'sourceMode', 'reset',
+    'screenScale', 'superSample', 'sharpen', 'useLayers', 'sourceMode', 'reset', 'ambient',
   ]);
 
   const toggleSettings = () => {

@@ -26,13 +26,11 @@ export interface VrSettings {
   foveation: number;
   /** 设备支持时是否使用原生合成层 */
   useLayers: boolean;
-  /**
-   * 强制指定眼缓冲宽度（像素，单眼）。0 = 交给倍率。
-   * framebufferScaleFactor 在很多运行时会被封顶，直接指定尺寸是绕过它的办法。
-   */
-  forceWidth: 0 | 1920 | 2560 | 3200 | 3840;
+
   /** 是否显示诊断信息 */
   diagnostics: boolean;
+  /** 环境亮度倍率。1 = SMPTE 参考环境（约屏幕峰值 10%） */
+  ambient: number;
 }
 
 export const DEFAULT_SETTINGS: VrSettings = {
@@ -44,8 +42,8 @@ export const DEFAULT_SETTINGS: VrSettings = {
   mipmaps:     true,
   foveation:   0,
   useLayers:   true,
-  forceWidth:  0,
   diagnostics: true,
+  ambient:     1,
 };
 
 type SettingValue = number | boolean | string;
@@ -142,24 +140,23 @@ const ROWS: SettingRow[] = [
     ],
   },
   {
-    key:   'forceWidth',
-    label: '强制缓冲',
-    hint: '绕过被封顶的倍率 · 需重进VR',
-    options: [
-      { label: '自动',  value: 0    },
-      { label: '1920',  value: 1920 },
-      { label: '2560',  value: 2560 },
-      { label: '3200',  value: 3200 },
-      { label: '3840',  value: 3840 },
-    ],
-  },
-  {
     key: 'useLayers',
     label: '原生合成层',
     hint: '设备支持时才会生效',
     options: [
       { label: '自动', value: true  },
       { label: '关',   value: false },
+    ],
+  },
+  {
+    key:   'ambient',
+    label: '环境亮度',
+    hint: '1=参考环境 · 越暗对比越强',
+    options: [
+      { label: '全黑',  value: 0    },
+      { label: '0.5',   value: 0.5  },
+      { label: '1',     value: 1    },
+      { label: '1.5',   value: 1.5  },
     ],
   },
   {
