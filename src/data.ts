@@ -42,6 +42,13 @@ export interface Photo {
   focus?: PhotoFocus;
   /** 0–1，越高越适合做封面。功能 3 写入 */
   aesthetic?: number;
+  /**
+   * 深度图路径（相对站点根），8bit 灰度归一化视差：0=最远，255=最近。
+   * 由 scripts/depth_export.py 写入；没有就没有 3D 视差可看。
+   */
+  depth?: string;
+  /** 深度图对应的近/远平面（米）。只有 near<far 时视差才有意义 */
+  depthRange?: [number, number];
 }
 // 20 张图片，span 模式精心排布，配合 grid-auto-flow: dense 形成视觉节奏
 // export const PHOTOS: Photo[] = [

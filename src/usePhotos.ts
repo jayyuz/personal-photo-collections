@@ -22,6 +22,17 @@ export interface ApiPhoto {
   embedModel?: string;
   focus?:    PhotoFocus;
   aesthetic?: number;
+  depth?:      string;
+  depthRange?: [number, number];
+}
+
+/** 近/远平面必须都是正的有限数，且 near<far，否则当没有深度处理 */
+function finiteRange(r?: [number, number]): [number, number] | undefined {
+  if (!Array.isArray(r) || r.length !== 2) return undefined;
+  const [near, far] = r;
+  if (!Number.isFinite(near) || !Number.isFinite(far)) return undefined;
+  if (near <= 0 || far <= near) return undefined;
+  return [near, far];
 }
 
 function finiteFocus(f?: PhotoFocus): PhotoFocus | undefined {
@@ -52,6 +63,8 @@ export function toPhoto(p: ApiPhoto): Photo {
     embedModel: usableVec ? p.embedModel : undefined,
     focus:     finiteFocus(p.focus),
     aesthetic: Number.isFinite(p.aesthetic) ? p.aesthetic : undefined,
+    depth:      p.depth || undefined,
+    depthRange: finiteRange(p.depthRange),
   };
 }
 

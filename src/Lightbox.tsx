@@ -5,6 +5,7 @@ import { similarTo } from './ml/search';
 import { cardGeometry } from './PhotoCard';
 import type { CardGeometry } from './PhotoCard';
 import type { CinemaHandle } from './vr/cinema';
+import { webglAvailable } from './depth/support';
 import { SLIDE_EFFECTS, SLIDE_SPEEDS, resolveEffect } from './slideshow';
 import type { ConcreteEffect, SlideshowState } from './slideshow';
 
@@ -21,6 +22,8 @@ interface LightboxProps {
   /** 浏览模式（幻灯片）状态，由 App 持有：轮播定时器也在那边 */
   slideshow: SlideshowState;
   onSlideshow: (patch: Partial<SlideshowState>) => void;
+  /** 切到 3D 视差灯箱。只有当前照片带深度图时才会出现这个入口 */
+  onEnterDepth?: () => void;
 }
 
 /** 用 Cloudinary 生成一张极小的模糊图，做背景比在前端 blur 大图省得多 */
@@ -91,9 +94,11 @@ interface Gesture {
 
 export function Lightbox({
   photo, photos, onSelect, onClose, onPrev, onNext, hasPrev, hasNext,
-  slideshow, onSlideshow,
+  slideshow, onSlideshow, onEnterDepth,
 }: LightboxProps) {
   const { playing, effect, speedMs } = slideshow;
+  // 没有 WebGL 就别给用户一个点了会报错的按钮
+  const glOk = useMemo(webglAvailable, []);
   const [loaded, setLoaded] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [liveExif, setLiveExif] = useState<PhotoExif | undefined>();
@@ -867,6 +872,23 @@ export function Lightbox({
             </svg>
           </button>
         ) : null}
+        {photo.depth && onEnterDepth && (
+          <button
+            className="lb__d3"
+            onClick={onEnterDepth}
+            disabled={!glOk}
+            aria-label={glOk ? '进入 3D 视差浏览' : '3D 视差不可用：当前浏览器不支持 WebGL'}
+            title={glOk
+              ? '3D 视差：移动鼠标转换视角'
+              : '当前环境不支持 WebGL，无法进入 3D（换 Chrome / Edge / Safari，或打开硬件加速）'}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3.2 20.4 7.6v8.8L12 20.8 3.6 16.4V7.6z" />
+              <path d="M3.6 7.6 12 12l8.4-4.4M12 12v8.8" />
+            </svg>
+          </button>
+        )}
         {photos.length > 1 && (
           <button
             className={`lb__play ${playing ? 'lb__play--on' : ''}`}

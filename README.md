@@ -157,6 +157,63 @@ Transformers.js 用动态 `import()`，Vite 里 `optimizeDeps.exclude` 了该包
 
 ---
 
+## 3D 视差（深度图）
+
+照片详情里点 **3D** 按钮进入视差灯箱：鼠标移动时相机绕画面中心小幅公转，近处走得快、远处走得慢 —— 是真实的视角变换，不是叠几层做假位移。右上角可切回 2D，「返回普通浏览」回到原来的灯箱（缩放 / 拍摄信息都在那边）。
+
+深度图离线用 YOLO26-depth 预生成，浏览器只负责渲染：
+
+### 装一次环境
+
+脚本要 torch，别装进系统 Python，用独立虚拟环境：
+
+```bash
+python3 -m venv .venv                 # 已在 .gitignore 里
+.venv/bin/pip install ultralytics     # 会自动带上 torch / numpy / pillow
+.venv/bin/pip install "numpy<2"       # 见下面「坑」
+```
+
+装完就是这几样：`ultralytics 8.4.153` + `torch 2.2.2(CPU)` + `numpy 1.x` + `pillow`。
+
+> **坑**：pip 给 Python 3.12 解析到的 `torch 2.2.2` 是按 numpy 1.x 编的，
+> 配 numpy 2.x 会在推理时报 `Numpy is not available`（不是深度图的问题）。
+> 所以要么 `pip install "numpy<2"`，要么先装个新 torch（`pip install -U torch`）再装 ultralytics。
+
+装 `opencv-contrib-python` 是可选的：有了会多一步引导滤波，深度边缘更贴合物体；没有就退化成高斯模糊，也能跑。
+
+### 跑
+
+```bash
+.venv/bin/python scripts/depth_export.py --dry-run          # 先看会动哪些
+.venv/bin/python scripts/depth_export.py --limit 3          # 先跑 3 张看效果
+.venv/bin/python scripts/depth_export.py                    # 全量补生成（已有 depth 的跳过）
+.venv/bin/python scripts/depth_export.py --ids <id> --force # 重算某张
+.venv/bin/python scripts/depth_export.py --model yolo26s-depth.pt --force  # 换更准的模型重算
+.venv/bin/python scripts/depth_export.py --device mps       # Mac 上试 GPU（跑不动就去掉）
+```
+
+- 权重首次会从 GitHub releases 下到**当前目录**（`yolo26n-depth.pt`，13MB）。
+  想保持仓库干净，先下好再用 `--model /绝对路径/yolo26n-depth.pt` 指定。
+- CPU 上大约 4 秒一张，124 张约 7–8 分钟。
+
+- 产出 `public/depth/<id>.png`（8bit 灰度「归一化视差」，0=最远 255=最近，长边 640），
+  并把 `depth` / `depthRange` 两个字段写回 `public/photos.json`（原文件备份成 `photos.json.bak`）。
+- `--fake` 不跑模型，直接写一张径向渐变假深度图。装 torch 之前想先看前端链路通不通，用这个：
+  `python scripts/depth_export.py --fake --limit 2`。跑真模型时记得加 `--force` 覆盖掉。
+- 没装 opencv-contrib 也能跑，只是少一步引导滤波，深度边缘没那么贴合物体。
+- 上传时自动生成、以及浏览器端实时推理都还没做：实时推理单帧几百毫秒，跟不上鼠标。
+
+前端：`src/depth/parallax.ts`（three.js 细分网格 + 顶点位移）、`src/DepthLightbox.tsx`（专用灯箱）。
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 最大 yaw / pitch | 7° / 4° | 超过 10° 前景就开始拉伸 |
+| 平滑时间常数 | 90ms | 太小发抖，太大拖沓 |
+| 视差强度 | 0.12（灯箱里可调） | 近处相对画幅高度的位移量，0.05 微妙、0.25 夸张 |
+| 网格细分 | 176（长边） | 再高收益递减 |
+
+---
+
 ## 核对打标（冒烟）
 
 真实走 `src/ml/clip.ts` 和 `src/ml/tagging.ts`，不是另一套脚本：

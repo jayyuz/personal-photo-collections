@@ -3,6 +3,7 @@ import { usePhotos } from './usePhotos';
 import type { Photo } from './data';
 import { PhotoCard } from './PhotoCard';
 import { Lightbox } from './Lightbox';
+import { DepthLightbox } from './DepthLightbox';
 import { AdminPanel } from './AdminPanel';
 import { GallerySearch } from './GallerySearch';
 import { packPhotos, useGridColumns } from './pack';
@@ -19,6 +20,11 @@ export default function App() {
   // 密铺后的展示顺序；原顺序仍留在 photos 里，作为策展顺序
   const gallery = useMemo(() => packPhotos(visible, columns).order, [visible, columns]);
   const [lightboxPhoto, setLightboxPhoto] = useState<Photo | null>(null);
+  /**
+   * 3D 视差开关：打开后灯箱走 DepthLightbox。
+   * 只在当前这次浏览里记住，关掉灯箱就复位 —— 普通浏览的路径完全不受影响。
+   */
+  const [depthMode, setDepthMode] = useState(false);
   const [page,      setPage]      = useState<'gallery' | 'about'>('gallery');
   const [scrolled,  setScrolled]  = useState(false);
   const [menuOpen,  setMenuOpen]  = useState(false);
@@ -42,7 +48,13 @@ export default function App() {
   const openLightbox  = useCallback((p: Photo) => setLightboxPhoto(p), []);
   const closeLightbox = useCallback(() => {
     setLightboxPhoto(null);
+    setDepthMode(false);
     setSsState(prev => (prev.playing ? { ...prev, playing: false } : prev));
+  }, []);
+  /** 进 3D：顺手把自动播放停了，一边换图一边转视角很容易晕 */
+  const enterDepth = useCallback(() => {
+    setSsState(prev => (prev.playing ? { ...prev, playing: false } : prev));
+    setDepthMode(true);
   }, []);
   // 浏览模式下首尾相接，播放到头了自动绕回第一张
   const prevPhoto = useCallback(() => {
@@ -281,19 +293,33 @@ export default function App() {
         />
       )}
 
-      <Lightbox
-        photo={lightboxPhoto}
-        photos={gallery}
-        onSelect={(i) => { const p = gallery[i]; if (p) setLightboxPhoto(p); }}
-        onClose={closeLightbox}
-        onPrev={prevPhoto}
-        onNext={nextPhoto}
-        // 播放时能首尾相接，两端就都还有得翻
-        hasPrev={ss.playing ? gallery.length > 1 : currentIndex > 0}
-        hasNext={ss.playing ? gallery.length > 1 : currentIndex < gallery.length - 1}
-        slideshow={ss}
-        onSlideshow={setSs}
-      />
+      {depthMode && lightboxPhoto?.depth ? (
+        <DepthLightbox
+          photo={lightboxPhoto}
+          onClose={closeLightbox}
+          onPrev={prevPhoto}
+          onNext={nextPhoto}
+          // 翻页边界和普通灯箱保持一致，免得同一个按钮两边行为不一样
+          hasPrev={currentIndex > 0}
+          hasNext={currentIndex < gallery.length - 1}
+          onExitDepth={() => setDepthMode(false)}
+        />
+      ) : (
+        <Lightbox
+          photo={lightboxPhoto}
+          photos={gallery}
+          onSelect={(i) => { const p = gallery[i]; if (p) setLightboxPhoto(p); }}
+          onClose={closeLightbox}
+          onPrev={prevPhoto}
+          onNext={nextPhoto}
+          // 播放时能首尾相接，两端就都还有得翻
+          hasPrev={ss.playing ? gallery.length > 1 : currentIndex > 0}
+          hasNext={ss.playing ? gallery.length > 1 : currentIndex < gallery.length - 1}
+          slideshow={ss}
+          onSlideshow={setSs}
+          onEnterDepth={enterDepth}
+        />
+      )}
     </div>
   );
 }

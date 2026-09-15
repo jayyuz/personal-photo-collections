@@ -78,6 +78,12 @@ export function PhotoCard({ photo, onClick, index }: PhotoCardProps) {
           />
         )}
       </div>
+      {/* 有深度图的才标一下：124 张里只有几张能看 3D，不给个记号根本找不到 */}
+      {photo.depth && (
+        <span className="card__3d" title="这张可以进 3D 视差浏览" aria-label="支持 3D 视差">
+          3D
+        </span>
+      )}
       <div className="card__info">
         <span className="card__title">{photo.title}</span>
         {(photo.location || photo.year) && (

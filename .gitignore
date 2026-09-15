@@ -6,6 +6,13 @@ yarn.lock
 # 构建输出
 dist/
 
+# depth_export.py 写回 photos.json 前的备份
+public/photos.json.bak
+
+# Python 虚拟环境（跑 scripts/depth_export.py 用）
+.venv/
+venv/
+
 # 本地自签证书（dev:https 用）
 .cert/
 dist-ssr/
