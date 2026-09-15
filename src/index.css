@@ -598,5 +598,6 @@ a       { color: inherit; text-decoration: none; }
   .lb--depth .dlb__bar { bottom: 78px; gap: 8px; padding: 6px 8px; }
   .dlb__bar { flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px); }
   .dlb__caption { left: 16px; top: 16px; }
-  .lb__d3 { right: 68px; }
+  /* 3D 按钮保持在 right:164px：之前挪到 68px 正好和「信息」按钮叠在一起，
+     窄窗口下两个图标互相盖住，看起来就像没有这个按钮 */
 }
