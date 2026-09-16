@@ -557,8 +557,13 @@ a       { color: inherit; text-decoration: none; }
 }
 
 /* 3D 视差灯箱（DepthLightbox） */
-/* 普通灯箱上那个「进 3D」的入口，位置排在 VR 按钮右边 */
-.lb__d3 { position: absolute; top: 20px; right: 164px; z-index: 2; color: rgba(240,240,240,0.6); padding: 10px; border-radius: 50%; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: color 0.15s, background 0.2s; animation: lbFade 0.3s ease 0.14s backwards; }
+/*
+ * 普通灯箱上那个「进 3D」的入口。
+ * 放左上角而不是跟右上角那排图标挤：右上角从右往左已经排了
+ * 关闭(20) / 信息(68) / VR(116) / 播放(164) / 缩放(212)，
+ * 播放按钮还是 z-index 3，塞进去必然被盖住。左上角是空的。
+ */
+.lb__d3 { position: absolute; top: 20px; left: 20px; z-index: 3; color: rgba(240,240,240,0.6); padding: 10px; border-radius: 50%; background: rgba(10,10,10,0.28); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: color 0.15s, background 0.2s; animation: lbFade 0.3s ease 0.14s backwards; }
 .lb__d3:hover:not(:disabled) { color: #FFF; background: rgba(255,255,255,0.14); }
 .lb__d3:focus-visible { outline: 1px solid #FFF; outline-offset: 4px; }
 /* 不支持 WebGL 时置灰，但留在原位：用户看得见「原来有这个功能」 */
