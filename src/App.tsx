@@ -6,6 +6,7 @@ import { Lightbox } from './Lightbox';
 import { DepthLightbox } from './DepthLightbox';
 import { AdminPanel } from './AdminPanel';
 import { GallerySearch } from './GallerySearch';
+import { Hall } from './Hall';
 import { packPhotos, useGridColumns } from './pack';
 import { loadSlideshow, saveSlideshow } from './slideshow';
 import type { SlideshowState } from './slideshow';
@@ -25,7 +26,7 @@ export default function App() {
    * 只在当前这次浏览里记住，关掉灯箱就复位 —— 普通浏览的路径完全不受影响。
    */
   const [depthMode, setDepthMode] = useState(false);
-  const [page,      setPage]      = useState<'gallery' | 'about'>('gallery');
+  const [page,      setPage]      = useState<'gallery' | 'about' | 'hall'>('gallery');
   const [scrolled,  setScrolled]  = useState(false);
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
@@ -148,6 +149,8 @@ export default function App() {
           <nav className="nav__links" aria-label="主导航">
             <button className={`nav__link ${page === 'gallery' ? 'active' : ''}`}
               onClick={() => { setPage('gallery'); setMenuOpen(false); }}>Work</button>
+            <button className={`nav__link ${page === 'hall' ? 'active' : ''}`}
+              onClick={() => { setPage('hall'); setMenuOpen(false); }}>Hall</button>
             <button className={`nav__link ${page === 'about' ? 'active' : ''}`}
               onClick={() => { setPage('about'); setMenuOpen(false); }}>About</button>
           </nav>
@@ -160,13 +163,16 @@ export default function App() {
         {menuOpen && (
           <div className="nav__mob">
             <button onClick={() => { setPage('gallery'); setMenuOpen(false); }}>Work</button>
+            <button onClick={() => { setPage('hall'); setMenuOpen(false); }}>Hall</button>
             <button onClick={() => { setPage('about'); setMenuOpen(false); }}>About</button>
           </div>
         )}
       </header>
 
       <main>
-        {page === 'gallery' ? (
+        {page === 'hall' ? (
+          <Hall photos={gallery} onOpen={openLightbox} paused={!!lightboxPhoto} />
+        ) : page === 'gallery' ? (
           <>
             <section className="hero" ref={heroRef} aria-label="封面">
               {coverPhoto && (
@@ -266,21 +272,26 @@ export default function App() {
         )}
       </main>
 
-      <footer className="footer">
-        <span>© {new Date().getFullYear()} 光影记录</span>
-        <span className="footer__dot" aria-hidden="true">·</span>
-        <span>All rights reserved</span>
-      </footer>
+      {/* 展厅是撑满视口的场景，页脚和上传按钮浮在上面只会挡路 */}
+      {page !== 'hall' && (
+        <>
+          <footer className="footer">
+            <span>© {new Date().getFullYear()} 光影记录</span>
+            <span className="footer__dot" aria-hidden="true">·</span>
+            <span>All rights reserved</span>
+          </footer>
 
-      <button className="admin-fab" onClick={() => setAdminOpen(true)}
-        aria-label="管理作品" title="上传 / 管理作品">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
-      </button>
+          <button className="admin-fab" onClick={() => setAdminOpen(true)}
+            aria-label="管理作品" title="上传 / 管理作品">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+          </button>
+        </>
+      )}
 
       {adminOpen && (
         <AdminPanel

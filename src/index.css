@@ -606,3 +606,41 @@ a       { color: inherit; text-decoration: none; }
   /* 3D 按钮保持在 right:164px：之前挪到 68px 正好和「信息」按钮叠在一起，
      窄窗口下两个图标互相盖住，看起来就像没有这个按钮 */
 }
+
+/* ---------- 3D 展厅 ---------- */
+/* 撑满视口、压在 nav（z-index 100）下面，这样还能点顶部 tab 走出去 */
+.hall { position: fixed; inset: 0; z-index: 80; background: #f1efea; overflow: hidden; }
+.hall__canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.hall__canvas:active { cursor: grabbing; }
+
+.hall__loader { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 0 clamp(24px, 8vw, 120px); background: var(--bg); }
+.hall__loader-title { font-family: var(--f-head); font-size: clamp(1.5rem, 4vw, 2.5rem); font-weight: 700; letter-spacing: 0.04em; color: var(--fg); }
+.hall__loader-line { height: 1px; background: rgba(240,240,240,0.18); }
+.hall__loader-line i { display: block; height: 100%; background: var(--fg); transition: width 0.3s var(--ease-out); }
+.hall__loader-sub { display: flex; justify-content: space-between; font-size: 0.6875rem; letter-spacing: 0.22em; color: rgba(240,240,240,0.5); }
+
+.hall__hint { position: absolute; left: 50%; bottom: 22px; z-index: 3; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 8px 16px; border-radius: 999px; font-size: 0.75rem; letter-spacing: 0.04em; white-space: nowrap; color: rgba(20,20,20,0.66); background: rgba(255,255,255,0.68); border: 1px solid rgba(20,20,20,0.08); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); animation: lbFade 0.4s ease 0.3s backwards; pointer-events: none; }
+.hall__hint b { font-weight: 600; color: rgba(20,20,20,0.9); }
+
+/* 说明牌：走近才浮出来，走开原样收回去 */
+.hall__plate { position: absolute; left: 32px; top: calc(var(--nav-h) + 24px); z-index: 3; display: flex; flex-direction: column; gap: 3px; padding: 14px 18px; border-left: 1px solid rgba(20,20,20,0.25); opacity: 0; transform: translateY(6px); transition: opacity 0.28s var(--ease-out), transform 0.28s var(--ease-out); pointer-events: none; }
+.hall__plate.on { opacity: 1; transform: none; }
+.hall__plate-no { font-size: 0.625rem; letter-spacing: 0.22em; color: rgba(20,20,20,0.45); }
+.hall__plate-title { font-family: var(--f-head); font-size: 1.125rem; letter-spacing: 0.02em; color: #141414; }
+.hall__plate-sub { font-size: 0.75rem; letter-spacing: 0.1em; color: rgba(20,20,20,0.55); }
+.hall__plate-cta { margin-top: 6px; font-size: 0.625rem; letter-spacing: 0.2em; color: rgba(20,20,20,0.4); }
+
+/* 摇杆只在没有鼠标的设备上出现 */
+.hall__stick { display: none; position: absolute; left: 26px; bottom: 26px; z-index: 4; width: 116px; height: 116px; border-radius: 50%; background: rgba(255,255,255,0.35); border: 1px solid rgba(20,20,20,0.12); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); touch-action: none; }
+.hall__stick i { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(20,20,20,0.5); }
+@media (hover: none) and (pointer: coarse) {
+  .hall__stick { display: block; }
+  .hall__hint { display: none; }
+  .hall__plate { left: 20px; }
+}
+
+.hall__empty { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; font-size: 0.875rem; letter-spacing: 0.1em; color: rgba(20,20,20,0.5); }
+
+@media (max-width: 860px) {
+  .hall__plate { top: calc(var(--nav-h) + 12px); padding: 10px 14px; }
+}
