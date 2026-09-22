@@ -59,24 +59,48 @@ const CFG = {
   /** runway 是入口背墙到开场站位的留白，也就是回头走过去读前言墙的那段距离 */
   hall:    { halfWidth: 4.2, height: 4.4, runway: 4.8 },
   /** 每侧相邻两张画的间距；左右墙错开半格，走廊里看着不会像货架 */
-  slot:    3.0,
+  slot:    3.3,
   /** 入口到第一张画的距离，以及最后一张画到尽头墙的距离 */
   margin:  4.5,
-  art:     { maxW: 2.0, maxH: 1.44, centerY: 1.62 },
+  /** 画幅。墙有 4.4m 高，画小了整面墙就空着，这个尺寸和 slot 是一起定的 */
+  art:     { maxW: 2.3, maxH: 1.62, centerY: 1.66 },
+  /**
+   * 中庭陈设。两百米的直筒走廊光靠两边的画撑不住，
+   * 每隔一段放一条悬空的橡木坐凳，走起来才有段落感。
+   */
+  avenue:  { everySlots: 5, offset: 1.35, seatR: 0.36 },
   /**
    * 画框是三层贴着摆的：外框盒整个在墙里（局部 z ≤ 0），卡纸凸出一点，画心再往前一点。
    * 三层的 z 区间必须严格不相交，否则画心会陷进卡纸盒体里，看到的就只剩一块白卡纸。
    */
-  frame:   { border: 0.075, mat: 0.055, depth: 0.05, matDepth: 0.012, artGap: 0.002 },
+  frame:   { border: 0.028, mat: 0.075, depth: 0.05, matDepth: 0.012, artGap: 0.002 },
   walk:    { speed: 2.9, run: 6.2, accel: 12, turn: 10 },
   camera:  { dist: 5.6, height: 2.6, lookY: 1.45, lerp: 6, fov: 55 },
   /**
    * 在同一幅画前停稳 2 秒后，自动进入正对画作的观赏机位。
    *
-   * sideOffset 是相机沿走廊错开的距离。画心 1.62m 和角色头顶差不多高，
-   * 相机严格站在人正后方的话，脑袋刚好糊在画上；错开一点人就退到画面侧边了。
+   * 机位是「越过肩膀看画」：相机站在画的正前方（沿走廊和画心对齐），视线严格沿
+   * 墙面法线，画既在画面正中又不会被拍歪；相机退到人身后、抬到头顶之上，人就留
+   * 在画面下方。
+   *
+   * 人正好站在画和相机之间，脑袋压住画的下缘是躲不掉的 —— 机位一错开画就偏出
+   * 中心，所以改成让角色在这个机位里淡成剪影（bodyFade），照片照样整幅露出来。
    */
-  viewing: { delayMs: 2000, cameraDist: 3.4, cameraHeight: 2.15, sideOffset: 1.25, lerp: 3.4 },
+  viewing: {
+    delayMs: 2000,
+    /** 相机比人再往后退这么多。角色是大头比例，退得不够整个人会顶出画面 */
+    back: 3.4,
+    /** 相机离墙的距离夹在这个区间：太近装不下整幅画，太远人就成了小黑点 */
+    minDist: 3.9,
+    maxDist: 5.8,
+    /** 比角色 1.72m 的头顶高一截，视线才能从头上越过去；再高画面俯角就太大了 */
+    height: 2.5,
+    /** 观赏机位下角色的不透明度：看得出是个人，又不挡住照片 */
+    bodyFade: 0.42,
+    lerp: 3.4,
+    /** 走出这个距离才算离开这幅画，在那之前不会再自动抢一次镜头 */
+    resetRange: 4.4,
+  },
   character: {
     url: 'hall/personnage.glb',
     /** 模型自带的尺寸不是米，载入后按包围盒统一缩放到这个身高 */
@@ -172,22 +196,52 @@ function canvasTexture(
   return tex;
 }
 
-/** 水磨石地面：浅底 + 细碎斑点 + 分格缝 */
-function floorTexture(): THREE.CanvasTexture {
+/**
+ * 地面石材。学的是苹果店那种大板石灰岩：暖灰底、极低对比的云斑、
+ * 拼缝细到走近才看得见 —— 和原来那种高对比水磨石正相反，碎点一多整条走廊就吵。
+ */
+function stoneTexture(): THREE.CanvasTexture {
   const tex = canvasTexture(512, (ctx, s) => {
-    ctx.fillStyle = '#eceae5';
+    ctx.fillStyle = '#e7e4de';
     ctx.fillRect(0, 0, s, s);
-    for (let i = 0; i < 2600; i++) {
-      const g = 190 + Math.random() * 55;
-      ctx.fillStyle = `rgba(${g},${g - 4},${g - 10},${0.25 + Math.random() * 0.4})`;
-      const r = 0.6 + Math.random() * 2.2;
+    /*
+     * 只留高频的细砂点。低频的云斑试过，问题是一张贴图铺满整条走廊，
+     * 每块板上的斑一模一样，远看就是一地规则的污渍 —— 石材宁可平，不能有图案。
+     */
+    for (let i = 0; i < 4200; i++) {
+      const g = 196 + Math.random() * 44;
+      ctx.fillStyle = `rgba(${g},${g - 3},${g - 8},${0.08 + Math.random() * 0.12})`;
       ctx.beginPath();
-      ctx.arc(Math.random() * s, Math.random() * s, r, 0, Math.PI * 2);
+      ctx.arc(Math.random() * s, Math.random() * s, 0.4 + Math.random() * 1.0, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.strokeStyle = 'rgba(150,148,142,0.5)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(0, 0, s, s);
+    // 拼缝：细、浅，走近才看得见一格一格
+    ctx.strokeStyle = 'rgba(178,174,167,0.75)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, s - 1, s - 1);
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+/** 浅橡木：暖白底 + 细长木纹。苹果店里的木头都是这种发白的白橡，不是深胡桃 */
+function oakTexture(): THREE.CanvasTexture {
+  const tex = canvasTexture(512, (ctx, s) => {
+    ctx.fillStyle = '#dcc7a9';
+    ctx.fillRect(0, 0, s, s);
+    for (let i = 0; i < 110; i++) {
+      const y = Math.random() * s;
+      // 一成左右是深一点的节理线，其余是浅纹，全直线看着像塑料贴皮，给点起伏
+      const knot = Math.random() < 0.1;
+      ctx.strokeStyle = knot
+        ? 'rgba(157,124,86,0.42)'
+        : `rgba(190,163,128,${0.1 + Math.random() * 0.22})`;
+      ctx.lineWidth = knot ? 1.6 : 0.7 + Math.random() * 1.8;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 32; x <= s; x += 32) ctx.lineTo(x, y + Math.sin(x / s * Math.PI * 2 + i) * 2.4);
+      ctx.stroke();
+    }
   });
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
@@ -196,23 +250,25 @@ function floorTexture(): THREE.CanvasTexture {
 /**
  * 入口背墙上的前言。走进长廊之前转个身才看得到，是开场的那一眼。
  *
- * 排版刻意和站点其它地方拉开：中文走宋体一类的衬线，落款走 Archivo 的字距大写，
- * 像美术馆墙上刻的字，而不是网页里的一段文案。
+ * 排版跟着展厅一起走苹果那套：一句居中的大标题、一条细分割线、两行小字落款，
+ * 全用无衬线（中文 PingFang），颜色用苹果那三档灰。原来是宋体引文的美术馆做法，
+ * 和白墙发光顶棚的店堂对不上。
  *
  * 尺度是按「站在走廊里回头看」定的，不是按看网页定的。相机只能绕到角色身前，
  * 所以看这面墙最近也有 11.7m（`zNear - (heroRearZ - camera.dist)`），
- * 字高得做到 0.3m 上下才读得清 —— 也正因为放这么大，只放得下三句。
+ * 正文字高得做到 0.3m 上下才读得清 —— 也正因为放这么大，只放得下这几行。
  */
 const PREFACE = {
-  label: 'WORDS ON LIGHT',
+  label: 'PHOTOGRAPHY',
+  /** 主标题拆成两行自己控制断句，交给画布自动折行会断在奇怪的地方 */
+  head: ['每一次按下快门', '都是与时间的一场对话'],
   quotes: [
-    { line: '你最初的一万张照片，是最糟的。', by: 'HENRI CARTIER-BRESSON', cn: '亨利 · 卡蒂埃-布列松' },
-    { line: '照片不是拍来的，是做出来的。',   by: 'ANSEL ADAMS',           cn: '安塞尔 · 亚当斯' },
-    { line: '相机教人观看，哪怕手里没有相机。', by: 'DOROTHEA LANGE',      cn: '多萝西娅 · 兰格' },
+    { line: '你最初的一万张照片，是最糟的。', by: 'HENRI CARTIER-BRESSON' },
+    { line: '照片不是拍来的，是做出来的。',   by: 'ANSEL ADAMS' },
   ],
   font: {
-    head:  `'Archivo', system-ui, sans-serif`,
-    quote: `'Songti SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'STSong', 'SimSun', serif`,
+    latin: `'Archivo', -apple-system, system-ui, sans-serif`,
+    cn: `'PingFang SC', -apple-system, 'Hiragino Sans GB', 'Source Han Sans SC', 'Noto Sans CJK SC', system-ui, sans-serif`,
   },
   /** 画布像素；贴到墙上是 7.0m 宽，约 293 px/m */
   canvas: { w: 2048, h: 1024 },
@@ -230,37 +286,48 @@ function drawTracked(
   return Math.max(0, cx - track - x);
 }
 
+/** 同样的字距，只量宽不画，用来把加了字距的一行摆居中 */
+function trackedWidth(ctx: CanvasRenderingContext2D, text: string, track: number): number {
+  let w = 0;
+  for (const ch of text) w += ctx.measureText(ch).width + track;
+  return Math.max(0, w - track);
+}
+
 /** 把前言画进画布。下面的数字都是 PREFACE.canvas 那块画布上的像素。 */
 function drawPreface(cv: HTMLCanvasElement): void {
   const ctx = cv.getContext('2d');
   if (!ctx) return;
   ctx.clearRect(0, 0, cv.width, cv.height);
 
-  // 左边界是按最长那句居中反算的，短句自然往右参差
-  const X = 360;
-  const { head, quote } = PREFACE.font;
+  const mid = cv.width / 2;
+  const { latin, cn } = PREFACE.font;
 
-  ctx.fillStyle = '#9b968c';
-  ctx.font = `600 34px ${head}`;
-  drawTracked(ctx, PREFACE.label, X, 120, 15);
+  ctx.font = `600 36px ${latin}`;
+  ctx.fillStyle = '#86868b';
+  drawTracked(ctx, PREFACE.label, mid - trackedWidth(ctx, PREFACE.label, 18) / 2, 210, 18);
 
-  ctx.fillStyle = '#cec9c0';
-  ctx.fillRect(X, 162, 210, 3);
+  // 主标题：苹果的正文黑是 #1d1d1f，纯黑在白墙上反而显脏
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#1d1d1f';
+  ctx.font = `600 132px ${cn}`;
+  PREFACE.head.forEach((line, i) => ctx.fillText(line, mid, 400 + i * 168));
+
+  ctx.fillStyle = '#d2d2d7';
+  ctx.fillRect(mid - 110, 660, 220, 2);
 
   PREFACE.quotes.forEach((q, i) => {
-    const y = 350 + i * 262;
-
-    ctx.fillStyle = '#2b2a27';
-    ctx.font = `400 88px ${quote}`;
-    ctx.fillText(q.line, X, y);
-
-    ctx.fillStyle = '#8e897f';
-    ctx.font = `600 40px ${head}`;
-    const w = drawTracked(ctx, `— ${q.by}`, X, y + 88, 7);
-    ctx.fillStyle = '#aca69b';
-    ctx.font = `400 40px ${quote}`;
-    ctx.fillText(`· ${q.cn}`, X + w + 30, y + 88);
+    const y = 800 + i * 122;
+    ctx.fillStyle = '#6e6e73';
+    ctx.font = `400 62px ${cn}`;
+    ctx.fillText(q.line, mid, y);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#a1a1a6';
+    ctx.font = `600 34px ${latin}`;
+    drawTracked(ctx, q.by, mid - trackedWidth(ctx, q.by, 8) / 2, y + 48, 8);
+    ctx.textAlign = 'center';
   });
+
+  ctx.textAlign = 'left';
 }
 
 /** 角色脚下的一团软阴影，代替真实阴影贴图 */
@@ -414,16 +481,48 @@ export function startHall(opts: HallOptions): HallHandle {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  // 画心用的是 MeshBasicMaterial，色调映射只会把照片压灰，这里一律关掉
-  renderer.toneMapping = THREE.NoToneMapping;
+  /*
+   * 展厅走色调映射，照片不走。
+   *
+   * 不映射的话亮部是硬切的：墙面一过 1.0 就是一片死白，墙角、顶棚和远处全糊在一起。
+   * Neutral（Khronos PBR Neutral）只压高光、不动色相，正好是这种大白空间要的。
+   * 照片和脚印的材质都写了 toneMapped: false，映射碰不到它们，颜色还是原样。
+   */
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.25;
 
   /** 整个实例的生命周期标记。照片纹理、角色 glb、脚印图、网络字体都要靠它决定回调还该不该落地 */
   let stopped = false;
 
   const scene = new THREE.Scene();
-  const AIR = 0xf1efea;
+  const AIR = 0xf4f3f1;
   scene.background = new THREE.Color(AIR);
-  scene.fog = new THREE.Fog(AIR, 22, 78);
+  // 亮堂的店堂里不该有可见的雾，推远到只在长廊尽头收一下
+  scene.fog = new THREE.Fog(AIR, 34, 96);
+
+  /*
+   * 环境贴图：一张上白下灰的渐变当全景图，过一遍 PMREM 就是一间匀光的白盒子。
+   * Standard 材质的柔和漫反射和高光全靠它 —— 没有环境贴图的金属只会黑成一块。
+   *
+   * 原来用的是 three 自带的 RoomEnvironment，那间屋子的灯偏在一侧，
+   * 背着光的入口前言墙就比两侧墙灰一整档。渐变只分上下、不分朝向，四面墙才一样白。
+   * 生成一次，之后每帧零成本。
+   */
+  const envTex = canvasTexture(64, (ctx, s) => {
+    const g = ctx.createLinearGradient(0, 0, 0, s);
+    g.addColorStop(0, '#ffffff');   // 顶棚
+    g.addColorStop(0.5, '#f1efeb'); // 四壁
+    g.addColorStop(1, '#d9d5cf');   // 地面
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, s, s);
+  });
+  envTex.mapping = THREE.EquirectangularReflectionMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envRT = pmrem.fromEquirectangular(envTex);
+  scene.environment = envRT.texture;
+  scene.environmentIntensity = 0.8;
+  pmrem.dispose();
+  envTex.dispose();
 
   const camera = new THREE.PerspectiveCamera(CFG.camera.fov, 1, 0.1, 220);
 
@@ -446,19 +545,46 @@ export function startHall(opts: HallOptions): HallHandle {
   const heroStartZ = zNear - 0.5 - CFG.camera.dist;
 
   /* ---------- 地面 / 墙 / 天花 ---------- */
-  const floorMap = floorTexture();
-  floorMap.repeat.set(halfW * 2 / 2.4, depth / 2.4);
+  /*
+   * 整体是苹果零售店那套：暖白墙、大板石材地面、整片发光的顶棚、细边阳极氧化铝，
+   * 再加浅橡木做唯一的暖色。克制在这几样材质里，长廊才不会看着像样板间。
+   */
+  const stoneMap = stoneTexture();
+  // 一块板 1.2m 见方，拼缝密一点才像铺出来的地，而不是一张放大的贴图
+  stoneMap.repeat.set(halfW * 2 / 1.2, depth / 1.2);
+  // 走廊很长，地面几乎全是掠射角，没有各向异性过滤远处会糊成一片灰
+  stoneMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(halfW * 2, depth),
-    new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.42, metalness: 0.02 })
+    /*
+     * 哑光石材，但留一点透明度：地面底下压着一份镜像的发光顶棚（见 glow 那段），
+     * 透出来的那一点点就是苹果店里最认人的那条地面反光。真做平面反射要多渲一遍
+     * 整个场景，为这点效果不值。
+     */
+    new THREE.MeshStandardMaterial({
+      map: stoneMap, roughness: 0.36, metalness: 0.04, transparent: true, opacity: 0.84,
+    })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.position.z = zMid;
+  /*
+   * 地面成了半透明，就排进了透明队列，默认按距离排序 —— 站在走廊中间时，
+   * 地面这块大面片的中心反而比远处的脚印、接触阴影更近，会盖在它们上面。
+   * 钉死在最前面画，透明的那几层才叠得对。
+   */
+  floor.renderOrder = -1;
   scene.add(floor);
 
-  const wallMat    = new THREE.MeshStandardMaterial({ color: 0xf7f6f3, roughness: 0.95, metalness: 0 });
-  const plinthMat  = new THREE.MeshStandardMaterial({ color: 0x1b1c20, roughness: 0.7 });
-  const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xf3f2ef, roughness: 1 });
+  /** 橡木台和尽头木墙各自的尺度差太多，共用一张画布、各自一份 repeat */
+  const oakMap = oakTexture();
+  const endOakMap = oakMap.clone();
+  endOakMap.needsUpdate = true;   // clone 出来的是另一张 GL 贴图，得自己标一次上传
+  const wallMat    = new THREE.MeshStandardMaterial({ color: 0xf5f4f2, roughness: 0.88, metalness: 0 });
+  const oakMat     = new THREE.MeshStandardMaterial({ map: oakMap, roughness: 0.52, metalness: 0 });
+  const endOakMat  = new THREE.MeshStandardMaterial({ map: endOakMap, roughness: 0.55, metalness: 0 });
+  /** 墙脚 / 木台底下的那道暗缝。苹果店里不做踢脚线，靠一条阴影缝收口 */
+  const revealMat  = new THREE.MeshStandardMaterial({ color: 0x2f2f31, roughness: 1 });
+  const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xf7f7f6, roughness: 1 });
   const box = new THREE.BoxGeometry(1, 1, 1);
 
   /** 共用一个 1×1×1 的 box，靠 scale / position 摆出所有墙体 */
@@ -475,6 +601,102 @@ export function startHall(opts: HallOptions): HallHandle {
   addBox(wallMat, halfW * 2 + 0.6, wallH, 0.3, 0, wallH / 2, zFar - 0.15);   // 尽头
   addBox(wallMat, halfW * 2 + 0.6, wallH, 0.3, 0, wallH / 2, zNear + 0.15);  // 入口背墙
   addBox(ceilingMat, halfW * 2 + 0.6, 0.2, depth, 0, wallH + 0.1, zMid);
+
+  /*
+   * 尽头墙包一整面浅橡木，长廊尽头才有个落点。四周留一圈白墙收边，
+   * 木面再往前凸 20mm —— 齐平的话看着像贴了张木纹纸。
+   */
+  const endOakW = halfW * 2 - 0.8;
+  const endOakH = wallH - 0.7;
+  endOakMap.repeat.set(endOakW / 2.2, endOakH / 2.2);
+  addBox(endOakMat, endOakW, endOakH, 0.02, 0, endOakH / 2 + 0.25, zFar + 0.01);
+
+  /*
+   * 靠墙的浅橡木长条台。苹果店的木台都是挂在墙上的，底下留一条暗缝显得轻。
+   * 照片下沿在 0.9m 上下，0.44m 的台面不会打架；人被挡在 heroSide 之外，不会穿过去。
+   */
+  const benchTop = 0.44;
+  const benchDepth = 0.42;
+  const benchLen = depth - CFG.margin;
+  const benchZ = zMid - CFG.margin / 2;
+  oakMap.repeat.set(benchDepth / 2.2, benchLen / 2.2);
+
+  /** 贴地的接触阴影：靠墙一侧最深，往外 0.6m 化开。没有它木台像是浮在地上 */
+  const contactTex = canvasTexture(64, (ctx, s) => {
+    const g = ctx.createLinearGradient(0, 0, s, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0.26)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, s, s);
+  });
+  const contactMat = new THREE.MeshBasicMaterial({
+    map: contactTex, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  });
+
+  for (const s of [-1, 1] as const) {
+    const x = s * (halfW - benchDepth / 2);
+    addBox(oakMat, benchDepth, 0.1, benchLen, x, benchTop - 0.05, benchZ);
+    // 台面下的暗缝：悬空的错觉全在这条线上
+    addBox(revealMat, benchDepth - 0.06, 0.06, benchLen, x, benchTop - 0.13, benchZ);
+
+    const shade = new THREE.Mesh(new THREE.PlaneGeometry(0.62, benchLen), contactMat);
+    shade.rotation.x = -Math.PI / 2;
+    shade.position.set(s * (halfW - 0.31), 0.006, benchZ);
+    // 贴图的深色边在局部 -x，右墙那条要整片翻过来才朝着墙
+    shade.scale.x = s;
+    scene.add(shade);
+  }
+
+  // 墙脚的阴影缝，替掉原来那圈深色踢脚
+  addBox(revealMat, 0.02, 0.035, depth, -halfW + 0.01, 0.0175, zMid);
+  addBox(revealMat, 0.02, 0.035, depth,  halfW - 0.01, 0.0175, zMid);
+
+  /* ---------- 中庭坐凳 ---------- */
+  /**
+   * 挡人的陈设，都当成圆柱处理：人撞上去要被推开，相机臂也要在它前面收住，
+   * 不然镜头会从坐凳里穿过去。
+   */
+  const blockers: { x: number; z: number; r: number }[] = [];
+
+  const seatMap = oakMap.clone();
+  seatMap.needsUpdate = true;
+  seatMap.repeat.set(0.58 / 2.2, 1.9 / 2.2);
+  const seatMat = new THREE.MeshStandardMaterial({ map: seatMap, roughness: 0.5 });
+  const blobGeo = new THREE.PlaneGeometry(1, 1);
+  const blobMat = new THREE.MeshBasicMaterial({
+    map: blobTexture(), transparent: true, depthWrite: false,
+  });
+
+  const addSeat = (x: number, z: number) => {
+    addBox(seatMat, 0.58, 0.1, 1.9, x, 0.42, z);
+    addBox(revealMat, 0.5, 0.08, 1.82, x, 0.33, z);
+    // 两片薄脚缩在暗缝里，坐凳就像浮着
+    addBox(revealMat, 0.46, 0.29, 0.07, x, 0.145, z - 0.62);
+    addBox(revealMat, 0.46, 0.29, 0.07, x, 0.145, z + 0.62);
+    // 脚下的一团软阴影，和角色脚下用的是同一张图
+    const blob = new THREE.Mesh(blobGeo, blobMat);
+    blob.rotation.x = -Math.PI / 2;
+    blob.position.set(x, 0.006, z);
+    blob.scale.set(1.9, 1.9, 1);
+    scene.add(blob);
+    for (const d of [-0.62, 0, 0.62]) blockers.push({ x, z: z + d, r: CFG.avenue.seatR });
+  };
+
+  /*
+   * 每 everySlots 个画位放一条，左右轮流错开走廊中线：全摆正中间的话，
+   * 一路看过去就是一串挡在视线上的东西，走廊的纵深也被堵死了。
+   *
+   * 每条的 z 对齐到「对面那堵墙」的画位上。自动正对时相机贴着对面墙、平着看过来，
+   * 同侧的陈设要是和画同一个 z，就正好横在相机和画之间 —— 错开半格（1.65m）才让得开。
+   * 两头留空，别顶在门口和尽头墙上。
+   */
+  for (let k = 0; ; k++) {
+    const side = k % 2 === 0 ? -1 : 1;
+    const slot = CFG.avenue.everySlots * k + 2;
+    const z = -(CFG.margin + CFG.slot * (slot + (side === -1 ? 0.5 : 1)));
+    if (z < zFar + 3.5) break;
+    addSeat(side * CFG.avenue.offset, z);
+  }
 
   /*
    * 入口背墙的前言。背墙盒体从 zNear 铺到 zNear+0.3，所以内侧面正好在 zNear，
@@ -506,27 +728,53 @@ export function startHall(opts: HallOptions): HallHandle {
   preface.position.set(0, 2.42, zNear - 0.012);
   preface.rotation.y = Math.PI;
   scene.add(preface);
-  addBox(plinthMat, 0.06, 0.12, depth, -halfW + 0.03, 0.06, zMid);
-  addBox(plinthMat, 0.06, 0.12, depth,  halfW - 0.03, 0.06, zMid);
-
-  // 天花两条灯槽：纯自发光面片，不参与照明，只是让抬头有东西看
-  const stripMat = new THREE.MeshBasicMaterial({ color: 0xfffdf6 });
-  addBox(stripMat, 0.34, 0.04, depth - 1, -halfW * 0.45, wallH - 0.02, zMid);
-  addBox(stripMat, 0.34, 0.04, depth - 1,  halfW * 0.45, wallH - 0.02, zMid);
+  /*
+   * 发光顶棚。苹果店的天花是一整片匀光的膜，没有一盏看得见的灯，
+   * 所以这里不摆灯带，直接铺一张不受光的白面片，两侧各留一条白墙当灯槽收口。
+   *
+   * 面片上印着膜的分格缝：一整片纯白铺过去，远处会和雾连成一团，
+   * 长廊就没有了纵深。一条一条缝往前收，眼睛才读得出这条廊有多长。
+   */
+  const glowW = halfW * 2 - 1.1;
+  const glowL = depth - 0.6;
+  const glowMap = canvasTexture(128, (ctx, s) => {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, s, s);
+    ctx.strokeStyle = 'rgba(214,214,210,0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, s - 2, s - 2);
+  });
+  glowMap.wrapS = glowMap.wrapT = THREE.RepeatWrapping;
+  glowMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  glowMap.repeat.set(glowW / 2.4, glowL / 2.4);
+  // toneMapped: false —— 顶棚是光源本身，压了高光它就成了一片灰
+  const glowMat = new THREE.MeshBasicMaterial({ map: glowMap, toneMapped: false });
+  addBox(glowMat, glowW, 0.03, glowL, 0, wallH - 0.015, zMid);
+  // 地面底下的镜像顶棚，隔着半透明的石材透上来就是那条柔和的反光
+  addBox(glowMat, glowW, 0.03, glowL, 0, -(wallH - 0.015), zMid);
 
   /* ---------- 灯光 ---------- */
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb9b6ae, 1.7));
-  const key = new THREE.DirectionalLight(0xffffff, 1.3);
-  key.position.set(3, 8, 6);
+  /*
+   * 匀、亮、没有硬阴影。主力是环境贴图和半球光，方向光只留一点点，
+   * 用来让墙面和画框有个极淡的方向感 —— 打太足就成了打光的美术馆，不是苹果店。
+   */
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xe8e4dc, 0.35));
+  /*
+   * 方向光几乎垂直往下打。斜着打的话背向光的那面墙会明显发灰 ——
+   * 入口前言墙就是这么被压暗的，而匀光的店堂里四面墙该一样白。
+   */
+  const key = new THREE.DirectionalLight(0xffffff, 0.3);
+  key.position.set(1, 10, 1.5);
   scene.add(key);
-  // 跟着角色走的一盏补光，免得长廊深处墙面糊成一片
-  const lamp = new THREE.PointLight(0xfff6e8, 22, 26, 2);
+  // 跟着角色走的一盏补光，免得长廊深处墙面糊成一片。贴着墙会烧出一圈光斑，见 tick 里的 0.3
+  const lamp = new THREE.PointLight(0xfff8ee, 5, 22, 2);
   lamp.position.y = 3.4;
   scene.add(lamp);
 
   /* ---------- 画框 ---------- */
-  const frameMat = new THREE.MeshStandardMaterial({ color: 0x24252a, roughness: 0.5 });
-  const matMat   = new THREE.MeshStandardMaterial({ color: 0xfbfaf7, roughness: 0.9 });
+  // 细边阳极氧化铝 + 纯白卡纸。金属的质感全来自环境贴图，别把 roughness 调高
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xc6cacd, roughness: 0.3, metalness: 0.85 });
+  const matMat   = new THREE.MeshStandardMaterial({ color: 0xfcfcfb, roughness: 0.85 });
   const plane    = new THREE.PlaneGeometry(1, 1);
   const frames: Frame[] = [];
 
@@ -859,10 +1107,20 @@ export function startHall(opts: HallOptions): HallHandle {
   let focused: Frame | null = null;
   let autoView: Frame | null = null;
   let focusSince = performance.now();
+  /** 这一趟已经自动正对过的那幅画，走远（viewing.resetRange）才清掉 */
+  let snapped: Frame | null = null;
+  /** 正对之后用户自己转了镜头：这幅画在离开之前不再抢镜头 */
+  let dismissed = false;
 
   const leaveAutoView = () => {
     autoView = null;
     focusSince = performance.now();
+  };
+
+  /** 用户自己转镜头。已经正对过一次的画就此作罢，走开再回来才重新接管 */
+  const takeCamera = () => {
+    if (snapped) dismissed = true;
+    leaveAutoView();
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -888,7 +1146,7 @@ export function startHall(opts: HallOptions): HallHandle {
   let dragged  = 0;
   let lastX = 0;
   const onPointerDown = (e: PointerEvent) => {
-    leaveAutoView();
+    takeCamera();
     dragging = true;
     dragged  = 0;
     lastX = e.clientX;
@@ -955,6 +1213,22 @@ export function startHall(opts: HallOptions): HallHandle {
     };
     until(hero.position.x, dx, -halfW + 0.45, halfW - 0.45);
     until(hero.position.z, dz, zFar + 0.45, zNear - 0.45);
+    /*
+     * 中庭的树和坐凳也要挡住相机：解一条从人出发、沿 (dx,dz) 的射线和圆的交点，
+     * 撞上就把臂收到撞点之前。人已经站在圆里时收不出有意义的距离，直接跳过。
+     */
+    for (const b of blockers) {
+      const fx = hero.position.x - b.x;
+      const fz = hero.position.z - b.z;
+      const rr = b.r + 0.3;
+      const c = fx * fx + fz * fz - rr * rr;
+      if (c <= 0) continue;
+      const half = fx * dx + fz * dz;
+      const disc = half * half - c;
+      if (disc <= 0) continue;
+      const hit = -half - Math.sqrt(disc);
+      if (hit > 0) t = Math.min(t, hit);
+    }
     return Math.max(0, t);
   };
 
@@ -974,6 +1248,8 @@ export function startHall(opts: HallOptions): HallHandle {
     heroShadow.material.opacity = to;
   };
   const wish = new THREE.Vector3();
+  /** 观赏机位那一档淡出的当前值，单独存一份才能平滑地进出剪影 */
+  let viewFade = 1;
   let raf = 0;
 
   const tick = () => {
@@ -1015,6 +1291,17 @@ export function startHall(opts: HallOptions): HallHandle {
     const limit = halfW - 0.7;
     hero.position.x = THREE.MathUtils.clamp(hero.position.x, -limit, limit);
     hero.position.z = THREE.MathUtils.clamp(hero.position.z, heroFront, heroBack);
+    // 中庭的陈设：贴着圆心推出去，擦着走时不会卡住，正面撞上去就是沿墙滑开
+    for (const b of blockers) {
+      const bx = hero.position.x - b.x;
+      const bz = hero.position.z - b.z;
+      const min = b.r + 0.32;
+      const d2 = bx * bx + bz * bz;
+      if (d2 < 1e-6 || d2 >= min * min) continue;
+      const d = Math.sqrt(d2);
+      hero.position.x = b.x + bx / d * min;
+      hero.position.z = b.z + bz / d * min;
+    }
     const moved = Math.hypot(hero.position.x - oldX, hero.position.z - oldZ);
     footprintDistance += moved;
     if (footprintDistance >= CFG.footprints.spacing) {
@@ -1054,25 +1341,19 @@ export function startHall(opts: HallOptions): HallHandle {
     phase += vel.length() * dt * 2.6;
     animateBody(dt, phase, gait, vel.length());
 
-    /* 相机跟随；观赏模式下相机移到人物背后，并把视线直接落在画心。 */
+    /* 相机跟随；观赏模式下相机退到人身后、抬过头顶，正对着画看。 */
     if (autoView) {
-      const dx = autoView.pos.x - hero.position.x;
-      const dz = autoView.pos.z - hero.position.z;
-      const len = Math.hypot(dx, dz) || 1;
-      const fx = dx / len;
-      const fz = dz / len;
-      // 画一律挂在左右墙上，法线永远沿 ±x，所以「沿走廊错开」就是加一段 z
-      camTarget.set(
-        hero.position.x - fx * CFG.viewing.cameraDist,
-        CFG.viewing.cameraHeight,
-        hero.position.z - fz * CFG.viewing.cameraDist + CFG.viewing.sideOffset
+      // 画一律挂在左右墙上，法线永远沿 ±x：side -1 是左墙，正面朝 +x
+      const nx = -autoView.side;
+      const out = THREE.MathUtils.clamp(
+        Math.abs(hero.position.x - autoView.pos.x) + CFG.viewing.back,
+        CFG.viewing.minDist,
+        CFG.viewing.maxDist
       );
-      // 退出自动模式后手动镜头从当前方向接着走，不会突然跳回旧 yaw。
-      // 用实际的「人 → 相机」方向，把 sideOffset 也算进去，否则松手瞬间会横甩一下。
-      yaw = Math.atan2(
-        -fx * CFG.viewing.cameraDist,
-        -fz * CFG.viewing.cameraDist + CFG.viewing.sideOffset
-      );
+      // 沿走廊和画心对齐，画才落在画面正中
+      camTarget.set(autoView.pos.x + nx * out, CFG.viewing.height, autoView.pos.z);
+      // 退出自动模式后手动镜头从当前方向接着走，不会突然跳回旧 yaw
+      yaw = Math.atan2(camTarget.x - hero.position.x, camTarget.z - hero.position.z);
     } else {
       const dx = Math.sin(yaw);
       const dz = Math.cos(yaw);
@@ -1090,16 +1371,20 @@ export function startHall(opts: HallOptions): HallHandle {
       camTarget,
       Math.min(1, (autoView ? CFG.viewing.lerp : CFG.camera.lerp) * dt)
     );
-    if (autoView) lookAt.copy(autoView.pos);
+    // 视线的 z 跟着相机走，方向就严格是墙面法线，画面不会被拍斜；转场途中也一直是正的
+    if (autoView) lookAt.set(autoView.pos.x, autoView.pos.y, camera.position.z);
     else lookAt.set(hero.position.x, CFG.camera.lookY, hero.position.z);
     camera.lookAt(lookAt);
 
     // 相机被墙压到人身上时把角色淡掉。走到入口墙跟前读前言，挡在中间的就不该是后脑勺
-    setBodyFade((Math.hypot(
+    // 观赏机位下另淡一档：人就站在画前面，淡成剪影照片才完整露出来
+    viewFade += ((autoView ? CFG.viewing.bodyFade : 1) - viewFade) * Math.min(1, 3 * dt);
+    setBodyFade(Math.min(viewFade, (Math.hypot(
       camera.position.x - hero.position.x,
       camera.position.z - hero.position.z
-    ) - 0.9) / 1.5);
-    lamp.position.set(hero.position.x, 3.4, hero.position.z);
+    ) - 0.9) / 1.5));
+    // 只跟一小段横向：补光贴到墙上会在画的旁边烧出一个亮斑，匀光的店堂里格外扎眼
+    lamp.position.set(hero.position.x * 0.3, 3.4, hero.position.z);
 
     /*
      * 正在看哪张画：按视线角度 + 人到画的距离挑。
@@ -1132,10 +1417,20 @@ export function startHall(opts: HallOptions): HallHandle {
       focusSince = now;
       onFocus?.(best ? best.photo : null);
     }
+    // 走出这幅画的范围才算逛完；下次再走过来，自动正对重新生效
+    if (snapped && Math.hypot(
+      snapped.pos.x - hero.position.x, snapped.pos.z - hero.position.z
+    ) > CFG.viewing.resetRange) {
+      snapped = null;
+      dismissed = false;
+    }
     if (best && !moving && !dragging && !autoView
+        && !(dismissed && best === snapped)
         && bestDist <= CFG.focus.turnRange
         && now - focusSince >= CFG.viewing.delayMs) {
       autoView = best;
+      snapped = best;
+      dismissed = false;
     }
     // 选中的那张微微凸出来，说明牌亮起时视线能对上是哪一幅
     if (focused) focused.group.scale.lerp(FOCUS_SCALE, Math.min(1, 8 * dt));
@@ -1175,6 +1470,7 @@ export function startHall(opts: HallOptions): HallHandle {
     });
     // 脚印可能已全部淡出并移出 scene，共享的 geometry / texture 碰不到上面的 traverse
     Object.values(stamp).forEach(s => { s?.geo.dispose(); s?.tex.dispose(); });
+    envRT.dispose();
     mixer?.stopAllAction();
     figure?.dispose();
     renderer.dispose();
